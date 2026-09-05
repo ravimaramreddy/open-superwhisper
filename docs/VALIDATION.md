@@ -40,24 +40,32 @@ found only the desktop code, renderer, Python runtime/setup, licenses and notice
 no provider SDKs, meeting services, account flows, search database or embedding
 models were packaged. Models are separate from the application bundle.
 
-Microphone and Accessibility permissions have **not** been granted during these
-checks. Physical microphone capture and actual insertion into another application
-remain first-use checks for the owner. Dispatch tests validate the control logic,
-not OS permission or acceptance by every target application.
+The owner granted Microphone and Accessibility and completed real dictations.
+Their initial auto-paste attempts exposed a packaged-helper identity mismatch:
+the main app was authorized, but macOS attributed the child helper to a separate
+executable-path identity and denied it.
+
+The replacement Objective-C++ Node-API addon checks permission and posts the key
+pair inside the main app process. Both native permission checks succeeded under
+the existing grant. The installed replacement was then tested against a blank
+TextEdit document: it inserted a fixed test sentence exactly once automatically,
+and the document's accessibility value confirmed the text. No manual paste was
+used. This verifies real OS insertion into TextEdit, not acceptance by every app.
 
 ## Automated checks
 
-- 68 Node tests: microphone-opening races, cancellation, PCM/WAV capture, fixed
+- 71 Node tests: microphone-opening races, cancellation, PCM/WAV capture, fixed
   routing, fallback, immutable history, durable delivery claims, clipboard format
-  restoration, helper abort, Python child protocol, Studio load cancellation,
+  restoration, queued delivery cancellation, Python child protocol, Studio load cancellation,
   shortcut normalization, deletion, crash cleanup, setup shutdown races and
   termination of an owned installer process group and ordered application shutdown.
+  Native tests cover malformed targets, impossible-target probes and worker-thread rejection.
 - 7 Python tests: protocol, WAV ownership/format validation, correction failure,
   and verified model setup behavior. These tests do not import MLX.
 - ESLint, TypeScript, Prettier and Ruff passed.
-- Swift helper compilation and production renderer build passed.
+- Objective-C++ Node-API compilation and production renderer build passed.
 
-Review found and corrected cold Studio cancellation, helper cancellation, atomic
+Review found and corrected cold Studio cancellation, delivery cancellation, atomic
 clipboard restoration and initial Studio status. Further committed review and CI
 results are attached to the pull request.
 
@@ -66,14 +74,14 @@ Reproduce deterministic checks with:
 ```sh
 npm run quality-check
 npm run lint:python
+npm run compile:native
 npm test
 npm run test:python
 npm run build:renderer
-npm run compile:native
 ```
 
 The final installed app was also checked for idle Quit: its window and process
 both exited. Shutdown cancels the renderer, closes owned inference, and drains
 pending transcript/rewrite cleanup before terminating. Active-work shutdown is
-covered by controlled tests; live recording shutdown remains untested until
-microphone permission is granted.
+covered by controlled tests; quitting during a live microphone recording remains
+a separate manual check.
