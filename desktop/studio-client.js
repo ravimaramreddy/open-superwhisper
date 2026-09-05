@@ -214,7 +214,7 @@ class StudioClient {
         [
           ...this.sshOptions(),
           this.target,
-          ["/Users/ravi/.lmstudio/bin/lms", ...args].map(quote).join(" "),
+          ['"$HOME/.lmstudio/bin/lms"', ...args.map(quote)].join(" "),
         ],
         {
           stdio: ["ignore", "ignore", "pipe"],

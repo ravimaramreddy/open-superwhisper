@@ -167,7 +167,7 @@ test("Studio recognition sends canonical vocabulary only and omits an empty hint
     await client.transcribe({
       audioPath,
       vocabulary: [
-        { word: "OpenSuperwhisper", aliases: ["weapon super whisper"] },
+        { word: "OpenSuperwhisper", aliases: ["open super whisper"] },
         { word: "Tailscale", aliases: [] },
       ],
     });

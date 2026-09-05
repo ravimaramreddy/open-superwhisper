@@ -4,22 +4,22 @@ The fork keeps Electron, React and the macOS keyboard foundation while replacing
 the active startup graph. It does not start the upstream account, subscription,
 provider catalog, sync, calendar, meeting, chat, search or embedding services.
 
-| Directory                        | Responsibility                                               |
-| -------------------------------- | ------------------------------------------------------------ |
-| `desktop/main.js` / `preload.js` | Window, tray, shortcut, permissions and narrow IPC bridge    |
-| `desktop/controller.js`          | Recording ownership, cancellation, save-before-delivery      |
-| `desktop/history.js`             | Atomic, bounded history; immutable original; delivery claims |
-| `desktop/vocabulary.js`          | Bounded dictionary validation and protected phrase matching |
+| Directory                        | Responsibility                                                |
+| -------------------------------- | ------------------------------------------------------------- |
+| `desktop/main.js` / `preload.js` | Window, tray, shortcut, permissions and narrow IPC bridge     |
+| `desktop/controller.js`          | Recording ownership, cancellation, save-before-delivery       |
+| `desktop/history.js`             | Atomic, bounded history; immutable original; delivery claims  |
+| `desktop/vocabulary.js`          | Bounded dictionary validation and protected phrase matching   |
 | `desktop/edit-review.js`         | Best-effort checks; retained text plus reviewable suggestions |
-| `desktop/native.js`              | Frontmost-app check, clipboard and single paste attempt      |
-| `resources/macos-local-paste.mm` | Native target validation and keyboard dispatch               |
-| `desktop/inference.js`           | Fixed profiles, fallback, setup and lifetime                 |
-| `desktop/studio-client.js`       | App-owned SSH forwards and E4B instance                      |
-| `desktop/air-worker-client.js`   | One local worker, cancellation and idle release              |
-| `local-runtime/worker.py`        | Serial MLX speech and cleanup over line-delimited JSON       |
-| `local-runtime/models.lock.json` | Exact model revisions, file hashes and runtime versions      |
-| `scripts/setup-local-runtime.py` | Persistent uv environment and verified model installation    |
-| `local-ui/`                      | Dictate, History, Settings and bounded AudioWorklet capture  |
+| `desktop/native.js`              | Frontmost-app check, clipboard and single paste attempt       |
+| `resources/macos-local-paste.mm` | Native target validation and keyboard dispatch                |
+| `desktop/inference.js`           | Fixed profiles, fallback, setup and lifetime                  |
+| `desktop/studio-client.js`       | App-owned SSH forwards and E4B instance                       |
+| `desktop/air-worker-client.js`   | One local worker, cancellation and idle release               |
+| `local-runtime/worker.py`        | Serial MLX speech and cleanup over line-delimited JSON        |
+| `local-runtime/models.lock.json` | Exact model revisions, file hashes and runtime versions       |
+| `scripts/setup-local-runtime.py` | Persistent uv environment and verified model installation     |
+| `local-ui/`                      | Dictate, History, Settings and bounded AudioWorklet capture   |
 
 ## Recording lifecycle
 
@@ -69,9 +69,9 @@ from the exact checkpoint revision. No model inference runs during installation.
 Changing the lock invalidates readiness and requires setup again.
 
 Studio speech and LM Studio remain independently managed. Only the app's tunnel
-and unique editing instance are app-owned. The Studio CLI path reflects this
-personal installation; changing hosts may require adapting that path as well as
-configuring SSH. Remote cancellation stops accepting results; an existing remote
+and unique editing instance are app-owned. The Studio CLI is resolved from
+`$HOME/.lmstudio/bin/lms` on the remote host, using the authenticated SSH user's
+home directory. Remote cancellation stops accepting results; an existing remote
 service may finish computation after its client disconnects.
 
 ## Packaging boundaries

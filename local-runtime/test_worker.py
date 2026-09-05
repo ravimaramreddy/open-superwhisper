@@ -21,7 +21,7 @@ spec.loader.exec_module(worker)
 class WorkerTest(unittest.TestCase):
     def test_vocabulary_is_bounded_and_uses_only_canonical_spellings(self):
         entries = [
-            {"word": "OpenSuperwhisper", "aliases": ["weapon super whisper"]},
+            {"word": "OpenSuperwhisper", "aliases": ["open super whisper"]},
             {"word": "opensuperwhisper", "aliases": []},
             {"word": " Tailscale ", "aliases": []},
         ]
@@ -100,7 +100,7 @@ class WorkerTest(unittest.TestCase):
                     "vocabulary": [
                         {
                             "word": "OpenSuperwhisper",
-                            "aliases": ["weapon super whisper"],
+                            "aliases": ["open super whisper"],
                         }
                     ],
                 }

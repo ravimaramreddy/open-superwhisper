@@ -1,6 +1,7 @@
 # OpenSuperwhisper
 
-A personal Mac dictation fork of [OpenWhispr](https://github.com/OpenWhispr/openwhispr).
+Private dictation for macOS, with English cleanup, custom vocabulary and automatic
+paste. Built on [OpenWhispr](https://github.com/OpenWhispr/openwhispr).
 Press **⌃⌥Space**, speak, then press it again to place the text in your focused app.
 Press **Escape** to cancel. Recordings stop after two minutes.
 
@@ -47,7 +48,7 @@ This build targets Apple silicon Macs. Local setup requires
 [uv](https://docs.astral.sh/uv/getting-started/installation/), internet access for
 the first installation, and roughly 4 GB for the two model weight files, plus
 Python packages and installation cache. Keep enough memory free for both models:
-our M5 Air measurement peaked around 4.8 GB of MLX allocations. That is not the
+a measured M5 Air run peaked around 4.8 GB of MLX allocations. That is not the
 whole application's memory use.
 
 1. Open **OpenSuperwhisper.app**.
