@@ -1,0 +1,3 @@
+commands:
+  lint: npm run quality-check && npm run lint:python
+  test: npm test && npm run test:python && npm run build:renderer && npm run compile:native

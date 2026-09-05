@@ -1,3 +1,14 @@
+# Active fork notice
+
+This checkout builds **OpenSuperwhisper**, a personal macOS dictation fork.
+Use [README.md](README.md), [docs/LOCAL_ARCHITECTURE.md](docs/LOCAL_ARCHITECTURE.md),
+`package.json`, and the active `desktop/`, `local-ui/`, `local-runtime/` files.
+The upstream material below is retained for reference and describes features
+deliberately excluded from this build. Do not restore provider, account, meeting,
+search, or updater imports on the strength of these legacy instructions.
+
+---
+
 # OpenWhispr Technical Reference for AI Assistants
 
 This document provides comprehensive technical details about the OpenWhispr project architecture for AI assistants working on the codebase.
