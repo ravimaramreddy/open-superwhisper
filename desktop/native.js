@@ -82,12 +82,6 @@ function createNative({
             warning: "Text copied. Choose a text field and paste it.",
           };
         if (signal?.aborted) return { delivery: "cancelled" };
-        if (!bridge)
-          return {
-            delivery: "clipboard-only",
-            warning:
-              "Text copied. The automatic paste component could not load. Reinstall the app.",
-          };
         let result;
         try {
           // Runs in the permission-owning app process, with a final native target check.
