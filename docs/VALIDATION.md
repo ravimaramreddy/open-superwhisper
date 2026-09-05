@@ -1,7 +1,7 @@
 # Local build validation — 2026-09-05
 
-The installed build was checked on an M5 MacBook Air with 24 GB memory, using an
-M3 Ultra Studio with 96 GB for the remote profile. Model weights are installed in
+Test hardware: M5 MacBook Air with 24 GB memory; M3 Ultra Mac Studio with 96 GB
+for the remote profile. Model weights are installed in
 the app's persistent data directory; no temporary benchmark directory is required
 at runtime. SHA-256 verification succeeded for all locked model and notice files.
 
@@ -93,10 +93,9 @@ abandoned starts or explicit corrections. The revised Studio prompt gives
 concrete examples of resolving those into the speaker's intended written message.
 It preserves substantive uncertainty and exact technical or quoted text.
 
-A small vocabulary provides spellings for this setup. A narrow pronunciation hint
-handles the contiguous phrase `weapon super whisper` when it refers to the
-OpenSuperwhisper dictation app. Already-correct names, separate sentences,
-quotations and literal game/weapon names take priority over that hint.
+A small fixed vocabulary and narrow pronunciation hint were tested for app-name
+correction. Already-correct names, separate sentences, quotations and literal
+uses of the same words took priority over the hint.
 
 Text-only probes ran through the actual `StudioClient.edit` path and Studio E4B,
 with the production temperature, reasoning setting and output limit. The final
@@ -122,7 +121,7 @@ S1-mini normalizer and existing prompt. No models or services were replaced.
 
 The editable dictionary replaces the fixed names and pronunciation exception
 described above. The initial eight spellings have no mandatory aliases; users
-explicitly save recurring mishearings. There is no blanket “weapon” replacement.
+explicitly save recurring mishearings. No broad word replacement is built in.
 
 Read-only inspection confirmed the running Studio API supports multipart `vocab`
 and the installed Air mlx-audio Qwen supports native `hotwords`. Public audiobook
