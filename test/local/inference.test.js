@@ -185,3 +185,79 @@ test("overlapping inference is rejected instead of concurrently loading models",
   finish("raw");
   await first;
 });
+
+test("setup cannot spawn after shutdown during initial readiness check", async () => {
+  let ready;
+  let spawned = false;
+  const runtime = new Promise((resolve) => {
+    ready = resolve;
+  });
+  const instance = createInference({
+    userData: "/unused",
+    config: {
+      _deps: {
+        air: { shutdown: async () => {} },
+        studio: { shutdown: async () => {} },
+        readRuntime: () => runtime,
+        spawn: () => {
+          spawned = true;
+          throw new Error("unexpected spawn");
+        },
+      },
+    },
+  });
+  const pending = instance.prepareLocal();
+  await instance.shutdown();
+  ready(null);
+  await assert.rejects(pending, /closing/);
+  assert.equal(spawned, false);
+});
+
+test("shutdown terminates setup and waits for the child close event", async (t) => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { EventEmitter } = require("node:events");
+  const { PassThrough } = require("node:stream");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-setup-test-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  let killed = false;
+  child.kill = () => {
+    killed = true;
+  };
+  let started;
+  const spawning = new Promise((resolve) => {
+    started = resolve;
+  });
+  const instance = createInference({
+    userData: directory,
+    config: {
+      uvPath: process.execPath,
+      _deps: {
+        air: { shutdown: async () => {} },
+        studio: { shutdown: async () => {} },
+        readRuntime: async () => null,
+        spawn: () => {
+          started();
+          return child;
+        },
+      },
+    },
+  });
+  const pending = instance.prepareLocal();
+  const rejected = assert.rejects(pending, /failed|closing/);
+  await spawning;
+  let finished = false;
+  const shutdown = instance.shutdown().then(() => {
+    finished = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(killed, true);
+  assert.equal(finished, false);
+  child.emit("close", 1);
+  await Promise.all([shutdown, rejected]);
+  assert.equal(finished, true);
+});

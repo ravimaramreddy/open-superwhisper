@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { AppState, Profile, Settings, Transcript } from "../desktop/contracts";
 import { CaptureController, type CaptureView } from "./capture";
+import { shortcutFromEvent } from "./shortcut";
 
 const initialCapture: CaptureView = { phase: "idle", level: 0, elapsedMs: 0 };
 const shortcutLabel = (value: string) =>
@@ -739,28 +740,11 @@ export default function App({ preview = false }: { preview?: boolean }) {
                           return;
                         }
                         if (["Meta", "Control", "Alt", "Shift"].includes(event.key)) return;
-                        if (
-                          !event.metaKey &&
-                          !event.ctrlKey &&
-                          !event.altKey &&
-                          !/^F\d{1,2}$/.test(event.key)
-                        ) {
+                        const hotkey = shortcutFromEvent(event);
+                        if (!hotkey) {
                           setError(t("shortcutInvalid"));
                           return;
                         }
-                        const key =
-                          event.key === " "
-                            ? "Space"
-                            : event.key.length === 1
-                              ? event.key.toUpperCase()
-                              : event.key;
-                        const hotkey = [
-                          ...(event.metaKey ? ["Command"] : []),
-                          ...(event.ctrlKey ? ["Control"] : []),
-                          ...(event.altKey ? ["Alt"] : []),
-                          ...(event.shiftKey ? ["Shift"] : []),
-                          key,
-                        ].join("+");
                         setShortcutArmed(false);
                         void save({ hotkey });
                       }}

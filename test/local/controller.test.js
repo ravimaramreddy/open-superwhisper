@@ -252,3 +252,56 @@ test("connection state follows actual Studio and fallback outcomes", async (t) =
     assert.equal(controller.getState().studio, fallback ? "offline" : "ready");
   }
 });
+
+test("deleted transcripts cannot be recovered from duplicate request cache", async (t) => {
+  const { controller, history, calls } = harness(t);
+  const session = await controller.beginRecording();
+  const request = { requestId: session.requestId, audio: wav(), durationMs: 100 };
+  await controller.transcribe(request);
+  await controller.deleteTranscript(session.requestId);
+  assert.equal(history.get(session.requestId), null);
+  assert.equal(controller.getState().latest, null);
+  await assert.rejects(controller.transcribe(request), /session expired/);
+  await assert.rejects(controller.copyTranscript(session.requestId, "original"), /not found/);
+  assert.equal(calls.inference.length, 1);
+  assert.equal(calls.delivery.length, 1);
+});
+
+test("history off retains only the latest transcript and no settled promise cache", async (t) => {
+  const { controller, history } = harness(t, {
+    native: { deliver: async () => ({ delivery: "clipboard-only" }) },
+  });
+  await controller.updateSettings({ historyEnabled: false });
+  const ids = [];
+  for (let index = 0; index < 3; index++) {
+    const session = await controller.beginRecording();
+    ids.push(session.requestId);
+    await controller.transcribe({ requestId: session.requestId, audio: wav(), durationMs: 100 });
+  }
+  assert.equal(controller.completed.size, 0);
+  assert.equal(controller.state.history, undefined);
+  assert.deepEqual(history.list(), []);
+  assert.equal(history.get(ids[0]), null);
+  assert.equal(history.get(ids[1]), null);
+  assert.equal(history.get(ids[2]).id, ids[2]);
+});
+
+test("startup removes only owned abandoned recording folders and never follows symlinks", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "local-orphans-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const recordings = path.join(root, "recordings");
+  fs.mkdirSync(recordings);
+  const orphan = fs.mkdtempSync(path.join(recordings, "open-superwhisper-"));
+  fs.writeFileSync(path.join(orphan, "recording.wav"), wav());
+  const unrelated = path.join(recordings, "keep-me");
+  fs.mkdirSync(unrelated);
+  fs.writeFileSync(path.join(unrelated, "keep.txt"), "keep");
+  const outside = path.join(root, "outside");
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, "keep.txt"), "keep");
+  fs.symlinkSync(outside, path.join(recordings, "open-superwhisper-ABC123"));
+  harness(t, { controller: { temporaryRoot: recordings } });
+  assert.equal(fs.existsSync(orphan), false);
+  assert.equal(fs.existsSync(path.join(unrelated, "keep.txt")), true);
+  assert.equal(fs.existsSync(path.join(outside, "keep.txt")), true);
+});

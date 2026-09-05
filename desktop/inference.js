@@ -97,6 +97,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
   const now = deps.now || (() => performance.now());
   let setupPromise = null;
   let setupChild = null;
+  let setupExited = null;
   let closed = false;
   let busy = false;
   const lifetime = new AbortController();
@@ -145,7 +146,9 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
 
   async function prepareLocal() {
     if (closed) throw new Error("Application is closing");
-    if (await getRuntime()) return true;
+    const ready = await getRuntime();
+    if (closed) throw new Error("Application is closing");
+    if (ready) return true;
     if (setupPromise) return setupPromise;
     setupPromise = (async () => {
       const uv = findUv(config.uvPath);
@@ -166,6 +169,10 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
       if (config.seedQwen) args.push("--seed-qwen", config.seedQwen);
       if (config.seedS1) args.push("--seed-s1", config.seedS1);
       await new Promise((resolve, reject) => {
+        if (closed) {
+          reject(new Error("Application is closing"));
+          return;
+        }
         const child = (deps.spawn || spawn)(uv, args, {
           stdio: ["ignore", "pipe", "pipe"],
           env: {
@@ -176,6 +183,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
           },
         });
         setupChild = child;
+        setupExited = new Promise((exited) => child.once("close", exited));
         let buffer = "",
           stderr = "",
           failure;
@@ -316,8 +324,15 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
   async function shutdown() {
     closed = true;
     lifetime.abort();
-    setupChild?.kill("SIGTERM");
-    await Promise.allSettled([air.shutdown(), studio.shutdown()]);
+    const child = setupChild;
+    child?.kill("SIGTERM");
+    const timer = child ? setTimeout(() => child.kill("SIGKILL"), 2000) : null;
+    timer?.unref();
+    try {
+      await Promise.allSettled([air.shutdown(), studio.shutdown(), setupExited]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   return {
     isLocalReady: async () => Boolean(await getRuntime()),

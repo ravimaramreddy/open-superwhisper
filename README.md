@@ -64,6 +64,7 @@ it a five-minute idle lifetime, and unloads only its own instance when closing.
   original stays unchanged when you rewrite. Turn history off to avoid saving
   new transcripts; existing history remains until you delete it.
 - Temporary audio is removed when processing completes or is cancelled.
+  App-owned recordings left by a crash are removed on the next launch.
   Raw text is saved before automatic delivery when history is enabled.
 - If focus changes, text stays on the clipboard. An uncertain paste is never
   automatically retried: check the target before pasting again.

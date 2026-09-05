@@ -30,7 +30,7 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
       key === "hotkey" &&
       (typeof value !== "string" ||
         value.length > 80 ||
-        !/^(?:(?:Control|Command|Alt|Option|Shift|Super)\+)+(?:Space|[A-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4]))$/i.test(
+        !/^(?:(?:(?:Control|Command|Alt|Option|Shift|Super)\+)+(?:Space|[A-Z0-9])|(?:(?:Control|Command|Alt|Option|Shift|Super)\+)*F(?:[1-9]|1[0-9]|2[0-4]))$/i.test(
           value
         ))
     ) {
@@ -47,6 +47,25 @@ function readSettings(file) {
     return normalizeSettings(JSON.parse(fs.readFileSync(file, "utf8")));
   } catch {
     return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function cleanupAbandonedRecordings(root) {
+  try {
+    if (!fs.existsSync(root)) return null;
+    if (!fs.lstatSync(root).isDirectory()) throw new Error("Invalid recordings directory");
+    const owned = fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter(
+        (entry) => entry.isDirectory() && /^open-superwhisper-[A-Za-z0-9]{6}$/.test(entry.name)
+      );
+    for (const entry of owned.slice(0, 1000)) {
+      fs.rmSync(path.join(root, entry.name), { recursive: true });
+    }
+    if (owned.length > 1000) throw new Error("Too many abandoned recordings");
+    return null;
+  } catch {
+    return "Some temporary recordings could not be removed from the app's recordings folder.";
   }
 }
 
@@ -140,9 +159,10 @@ class Controller {
       studio: "unknown",
       phase: "idle",
       progress: "",
-      history: history.list(),
       latest: history.list()[0] || null,
-      error: history.warning,
+      error:
+        [history.warning, cleanupAbandonedRecordings(temporaryRoot)].filter(Boolean).join(" ") ||
+        null,
     };
   }
 
@@ -269,7 +289,12 @@ class Controller {
     request.submitted = true;
     const result = this.runTranscription(request, audio, durationMs);
     this.completed.set(requestId, result);
-    if (this.completed.size > 100) this.completed.delete(this.completed.keys().next().value);
+    // Deduplicate only in-flight work. History handles completed IDs; keeping
+    // settled promises would retain deleted/nonpersistent transcript text.
+    const release = () => {
+      this.completed.delete(requestId);
+    };
+    void result.then(release, release);
     return result;
   }
 
@@ -449,6 +474,7 @@ class Controller {
   async deleteTranscript(id) {
     this.idleRequired();
     this.history.delete(id);
+    this.completed.delete(id);
     if (this.state.latest?.id === id) this.state.latest = null;
     this.emit();
     return this.getState();
