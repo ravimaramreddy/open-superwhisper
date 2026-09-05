@@ -16,10 +16,10 @@
     "!node_modules/**/*"
   ],
   "asarUnpack": ["local-runtime/**/*", "scripts/setup-local-runtime.py"],
-  "extraResources": [
-    { "from": "resources/bin/macos-local-paste", "to": "bin/macos-local-paste" },
-    { "from": "src/assets/iconTemplate@3x.png", "to": "trayTemplate.png" }
+  "extraFiles": [
+    { "from": "resources/bin/macos-local-paste.node", "to": "Frameworks/macos-local-paste.node" }
   ],
+  "extraResources": [{ "from": "src/assets/iconTemplate@3x.png", "to": "trayTemplate.png" }],
   "npmRebuild": false,
   "publish": null,
   "mac": {

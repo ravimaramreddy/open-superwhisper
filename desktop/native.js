@@ -1,39 +1,37 @@
-const { execFile } = require("node:child_process");
-
-function runHelper(binary, args, signal) {
-  return new Promise((resolve) => {
-    execFile(
-      binary,
-      args,
-      { timeout: 2500, maxBuffer: 32 * 1024, windowsHide: true, signal },
-      (error, stdout) => {
-        let result;
-        try {
-          result = JSON.parse(stdout.trim());
-        } catch {
-          result = null;
-        }
-        resolve({ error, result });
-      }
-    );
-  });
+function loadBridge(binary) {
+  try {
+    return require(binary);
+  } catch {
+    // Recording and clipboard recovery remain available if the addon cannot load.
+    return null;
+  }
 }
 
 function createNative({
   binary,
   clipboard,
-  run = runHelper,
+  bridge = loadBridge(binary),
   delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   let queue = Promise.resolve();
+  function accessibility() {
+    try {
+      return bridge?.accessibility() === true;
+    } catch {
+      return false;
+    }
+  }
   async function captureTarget() {
-    const { error, result } = await run(binary, ["--frontmost"]);
-    if (error || !Number.isInteger(result?.pid) || result.pid <= 0 || result.pid === process.pid)
+    let result;
+    try {
+      result = bridge?.captureTarget();
+    } catch {
       return null;
-    return {
-      pid: result.pid,
-      bundleId: typeof result.bundleId === "string" ? result.bundleId : "",
-    };
+    }
+    if (!Number.isInteger(result?.pid) || result.pid <= 0 || result.pid === process.pid)
+      return null;
+    if (typeof result.bundleId !== "string") return null;
+    return { pid: result.pid, bundleId: result.bundleId };
   }
   function snapshotClipboard() {
     try {
@@ -78,12 +76,21 @@ function createNative({
             warning: "Text copied. Choose a text field and paste it.",
           };
         if (signal?.aborted) return { delivery: "cancelled" };
-        // The helper rechecks the frontmost PID immediately before dispatch.
-        const { error, result } = await run(
-          binary,
-          ["--paste", String(target.pid), target.bundleId],
-          signal
-        );
+        if (!bridge)
+          return {
+            delivery: "clipboard-only",
+            warning:
+              "Text copied. The automatic paste component could not load. Reinstall the app.",
+          };
+        let result;
+        try {
+          // Runs in the permission-owning app process, with a final native target check.
+          // The short synchronous call sends one complete key pair without retries.
+          result = bridge.paste(target.pid, target.bundleId);
+        } catch {
+          // An exception could follow a dispatched key. Preserve text and never retry.
+          result = null;
+        }
         if (result?.status === "dispatched") {
           await delay(180);
           if (original && clipboard.readText() === text) {
@@ -100,17 +107,19 @@ function createNative({
         if (
           result?.status === "target-changed" ||
           result?.status === "permission-required" ||
-          error?.code === "ENOENT"
+          result?.status === "unavailable"
         ) {
           return {
             delivery: "clipboard-only",
             warning:
               result?.status === "permission-required"
                 ? "Text copied. Enable Accessibility to paste automatically."
-                : "Text copied. The original app is no longer focused; paste when ready.",
+                : result?.status === "unavailable"
+                  ? "Text copied. Automatic paste is unavailable; paste when ready."
+                  : "Text copied. The original app is no longer focused; paste when ready.",
           };
         }
-        // A timeout/error can follow an emitted keystroke. Never automatically retry.
+        // An unknown result can follow an emitted keystroke. Never automatically retry.
         return {
           delivery: "uncertain",
           warning:
@@ -120,7 +129,7 @@ function createNative({
     queue = operation.catch(() => {});
     return operation;
   }
-  return { captureTarget, deliver };
+  return { accessibility, captureTarget, deliver };
 }
 
-module.exports = { createNative, runHelper };
+module.exports = { createNative };

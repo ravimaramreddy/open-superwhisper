@@ -9,6 +9,7 @@ const {
   systemPreferences,
   clipboard,
   dialog,
+  shell,
 } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -138,8 +139,8 @@ async function start() {
   const history = new History(path.join(userData, "history.json"));
   const native = createNative({
     binary: app.isPackaged
-      ? path.join(process.resourcesPath, "bin", "macos-local-paste")
-      : path.join(app.getAppPath(), "resources", "bin", "macos-local-paste"),
+      ? path.join(process.resourcesPath, "..", "Frameworks", "macos-local-paste.node")
+      : path.join(app.getAppPath(), "resources", "bin", "macos-local-paste.node"),
     clipboard,
   });
   inference = createInference({
@@ -158,11 +159,16 @@ async function start() {
     permissions: {
       get: () => ({
         microphone: systemPreferences.getMediaAccessStatus("microphone"),
-        accessibility: systemPreferences.isTrustedAccessibilityClient(false),
+        accessibility: native.accessibility(),
       }),
       request: async (kind) => {
         if (kind === "microphone") await systemPreferences.askForMediaAccess("microphone");
-        else systemPreferences.isTrustedAccessibilityClient(true);
+        else {
+          systemPreferences.isTrustedAccessibilityClient(true);
+          await shell.openExternal(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+          );
+        }
       },
     },
     applySettings: async (next, previous) => {
