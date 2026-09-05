@@ -71,3 +71,9 @@ npm run test:python
 npm run build:renderer
 npm run compile:native
 ```
+
+The final installed app was also checked for idle Quit: its window and process
+both exited. Shutdown cancels the renderer, closes owned inference, and drains
+pending transcript/rewrite cleanup before terminating. Active-work shutdown is
+covered by controlled tests; live recording shutdown remains untested until
+microphone permission is granted.
