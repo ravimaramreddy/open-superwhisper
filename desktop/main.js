@@ -322,15 +322,19 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (shuttingDown) return;
   shuttingDown = true;
+  command("cancel");
   rendererReady = false;
   globalShortcut.unregisterAll();
   void (async () => {
     try {
       await controller?.cancel();
       await inference?.shutdown();
+      await controller?.drain();
     } finally {
       quitting = true;
-      app.quit();
+      // Cleanup is complete. Do not re-enter the cancellable quit event;
+      // a second quit can leave a windowless macOS process behind.
+      app.exit(0);
     }
   })();
 });

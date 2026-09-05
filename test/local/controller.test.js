@@ -305,3 +305,26 @@ test("startup removes only owned abandoned recording folders and never follows s
   assert.equal(fs.existsSync(path.join(unrelated, "keep.txt")), true);
   assert.equal(fs.existsSync(path.join(outside, "keep.txt")), true);
 });
+
+test("shutdown drain waits for delivery bookkeeping and temporary audio removal", async (t) => {
+  const delivery = deferred();
+  const { controller, directory } = harness(t, { native: { deliver: () => delivery.promise } });
+  const session = await controller.beginRecording();
+  const pending = controller.transcribe({
+    requestId: session.requestId,
+    audio: wav(),
+    durationMs: 100,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await controller.cancel();
+  let drained = false;
+  const drain = controller.drain().then(() => {
+    drained = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(drained, false);
+  delivery.resolve({ delivery: "uncertain" });
+  await Promise.all([pending, drain]);
+  assert.equal(controller.getState().phase, "idle");
+  assert.deepEqual(fs.readdirSync(path.join(directory, "recordings")), []);
+});

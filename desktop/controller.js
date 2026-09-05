@@ -151,6 +151,7 @@ class Controller {
     this.settingsFile = path.join(userData, "settings.json");
     this.active = null;
     this.completed = new Map();
+    this.rewrites = new Set();
     this.settingsQueue = Promise.resolve();
     this.state = {
       settings: readSettings(this.settingsFile),
@@ -435,7 +436,21 @@ class Controller {
     this.clipboard.writeText(source === "original" ? record.rawText : record.text);
   }
 
-  async rewriteTranscript(id) {
+  rewriteTranscript(id) {
+    const pending = this.runRewrite(id);
+    this.rewrites.add(pending);
+    const release = () => {
+      this.rewrites.delete(pending);
+    };
+    void pending.then(release, release);
+    return pending;
+  }
+
+  async drain() {
+    await Promise.allSettled([...this.completed.values(), ...this.rewrites]);
+  }
+
+  async runRewrite(id) {
     this.idleRequired();
     const record = this.history.get(id);
     if (!record) throw new Error("Transcript not found");
