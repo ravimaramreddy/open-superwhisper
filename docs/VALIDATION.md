@@ -85,3 +85,35 @@ both exited. Shutdown cancels the renderer, closes owned inference, and drains
 pending transcript/rewrite cleanup before terminating. Active-work shutdown is
 covered by controlled tests; quitting during a live microphone recording remains
 a separate manual check.
+
+## Studio cleanup follow-up
+
+The original cleanup prompt often made only punctuation-level changes and kept
+abandoned starts or explicit corrections. The revised Studio prompt gives
+concrete examples of resolving those into the speaker's intended written message.
+It preserves substantive uncertainty and exact technical or quoted text.
+
+A small vocabulary provides spellings for this setup. A narrow pronunciation hint
+handles the contiguous phrase `weapon super whisper` when it refers to the
+OpenSuperwhisper dictation app. Already-correct names, separate sentences,
+quotations and literal game/weapon names take priority over that hint.
+
+Text-only probes ran through the actual `StudioClient.edit` path and Studio E4B,
+with the production temperature, reasoning setting and output limit. The final
+candidate was checked on 24 nonempty content cases, plus empty and filler-only
+inputs. Checks covered false starts, explicit day/quantity/reviewer corrections,
+conditions, uncertainty, distinct product names, technical tokens and quotations.
+An earlier candidate changed an unrelated Superwhisper mention; it was rejected,
+and both that case and a new sentence-boundary control were checked again.
+
+These are curated, iteratively reused prompt-development probes, not a held-out
+accuracy benchmark or a new audio/ASR evaluation. The pronunciation hint is a
+specific vocabulary fix, not evidence that arbitrary misheard names can be
+recovered. The final observed content outputs retained facts and resolved the
+reported example; tone can still be smoothed (for example, repeated emphasis).
+Empty input returns empty. A filler-only completion was empty, so the existing
+runtime treated correction as unavailable and preserved the original. This
+fallback behavior has not been changed. Raw transcripts remain available.
+
+This update changes Studio cleanup only. The Air fallback still uses its tested
+S1-mini normalizer and existing prompt. No models or services were replaced.
