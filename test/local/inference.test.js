@@ -261,3 +261,68 @@ test("shutdown terminates setup and waits for the child close event", async (t) 
   await Promise.all([shutdown, rejected]);
   assert.equal(finished, true);
 });
+
+test(
+  "setup shutdown kills an owned descendant that ignores TERM and holds stderr",
+  { timeout: 6500, skip: process.platform === "win32" },
+  async (t) => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { spawn } = require("node:child_process");
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-setup-group-"));
+    let child;
+    t.after(() => {
+      if (child?.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          /* Already reaped. */
+        }
+      }
+      fs.rmSync(directory, { recursive: true, force: true });
+    });
+    const descendant = path.join(directory, "descendant.cjs");
+    fs.writeFileSync(
+      descendant,
+      'process.on("SIGTERM",()=>{}); console.log("ready"); setInterval(()=>{},1000);'
+    );
+    const parent = path.join(directory, "parent.cjs");
+    fs.writeFileSync(
+      parent,
+      'const {spawn}=require("node:child_process"); const c=spawn(process.execPath,[process.argv[2]],{stdio:["ignore","pipe","inherit"]}); c.stdout.once("data",()=>console.log(JSON.stringify({event:"progress",message:"fixture ready"})));'
+    );
+    let ready;
+    const waiting = new Promise((resolve) => {
+      ready = resolve;
+    });
+    const instance = createInference({
+      userData: directory,
+      onProgress: (message) => {
+        if (message === "fixture ready") ready();
+      },
+      config: {
+        uvPath: process.execPath,
+        _deps: {
+          air: { shutdown: async () => {} },
+          studio: { shutdown: async () => {} },
+          readRuntime: async () => null,
+          spawn: (_command, _args, options) => {
+            assert.equal(options.detached, true);
+            child = spawn(process.execPath, [parent, descendant], options);
+            return child;
+          },
+        },
+      },
+    });
+    const rejected = assert.rejects(instance.prepareLocal(), /failed|closing/);
+    await waiting;
+    const started = performance.now();
+    await instance.shutdown();
+    await rejected;
+    assert.ok(
+      performance.now() - started < 5000,
+      "inherited stderr must close after group termination"
+    );
+  }
+);

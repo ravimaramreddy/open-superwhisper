@@ -47,10 +47,11 @@ not OS permission or acceptance by every target application.
 
 ## Automated checks
 
-- 65 Node tests: microphone-opening races, cancellation, PCM/WAV capture, fixed
+- 66 Node tests: microphone-opening races, cancellation, PCM/WAV capture, fixed
   routing, fallback, immutable history, durable delivery claims, clipboard format
   restoration, helper abort, Python child protocol, Studio load cancellation,
-  shortcut normalization, deletion, crash cleanup and setup shutdown races.
+  shortcut normalization, deletion, crash cleanup, setup shutdown races and
+  termination of an owned installer process group.
 - 7 Python tests: protocol, WAV ownership/format validation, correction failure,
   and verified model setup behavior. These tests do not import MLX.
 - ESLint, TypeScript, Prettier and Ruff passed.

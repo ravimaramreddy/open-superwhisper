@@ -101,6 +101,16 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
   let closed = false;
   let busy = false;
   const lifetime = new AbortController();
+  function stopSetupChild(child, signal) {
+    if (!child) return;
+    if (process.platform !== "win32" && child.pid) {
+      try {
+        process.kill(-child.pid, signal);
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    } else child.kill(signal);
+  }
 
   async function readRuntime() {
     try {
@@ -174,6 +184,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
           return;
         }
         const child = (deps.spawn || spawn)(uv, args, {
+          detached: process.platform !== "win32",
           stdio: ["ignore", "pipe", "pipe"],
           env: {
             ...process.env,
@@ -195,7 +206,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
         child.stdout.on("data", (data) => {
           buffer += data;
           if (buffer.length > 65536) {
-            child.kill("SIGTERM");
+            stopSetupChild(child, "SIGTERM");
             failure = "Invalid setup response";
             return;
           }
@@ -325,13 +336,14 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     closed = true;
     lifetime.abort();
     const child = setupChild;
-    child?.kill("SIGTERM");
-    const timer = child ? setTimeout(() => child.kill("SIGKILL"), 2000) : null;
+    stopSetupChild(child, "SIGTERM");
+    const timer = child ? setTimeout(() => stopSetupChild(child, "SIGKILL"), 2000) : null;
     timer?.unref();
     try {
       await Promise.allSettled([air.shutdown(), studio.shutdown(), setupExited]);
     } finally {
       clearTimeout(timer);
+      stopSetupChild(child, "SIGKILL");
     }
   }
   return {
