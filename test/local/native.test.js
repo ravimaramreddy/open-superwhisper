@@ -77,7 +77,11 @@ test("pre-cancelled request cannot mutate clipboard or send keystrokes", async (
 
 test("missing target or missing native component gives manual copy without keyboard fallback", async () => {
   const { native, clipboard } = fixture(null);
-  assert.equal((await native.deliver({ text: "result", target: null })).delivery, "clipboard-only");
+  const captured = await native.captureTarget();
+  assert.equal(captured, null);
+  const uncaptured = await native.deliver({ text: "result", target: captured });
+  assert.equal(uncaptured.delivery, "clipboard-only");
+  assert.match(uncaptured.warning, /component could not load/);
   const result = await native.deliver({ text: "result", target });
   assert.equal(result.delivery, "clipboard-only");
   assert.match(result.warning, /component could not load/);

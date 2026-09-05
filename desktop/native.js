@@ -70,6 +70,12 @@ function createNative({
         if (signal?.aborted) return { delivery: "cancelled" };
         const original = snapshotClipboard();
         clipboard.writeText(text);
+        if (!bridge)
+          return {
+            delivery: "clipboard-only",
+            warning:
+              "Text copied. The automatic paste component could not load. Reinstall the app.",
+          };
         if (!target)
           return {
             delivery: "clipboard-only",
