@@ -2,10 +2,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { atomicWrite, MAX_TEXT } = require("./history");
+const { DEFAULT_VOCABULARY, normalizeVocabulary } = require("./vocabulary");
 
 const DEFAULT_SETTINGS = Object.freeze({
   profile: "auto",
   cleanup: true,
+  format: "prose",
+  vocabulary: DEFAULT_VOCABULARY,
   microphoneId: "default",
   hotkey: "Control+Alt+Space",
   historyEnabled: true,
@@ -22,6 +25,12 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
     const value = patch[key];
     if (key === "profile" && !["auto", "studio", "air"].includes(value))
       throw new Error("Invalid profile");
+    if (key === "format" && !["prose", "paragraphs", "list"].includes(value))
+      throw new Error("Invalid text format");
+    if (key === "vocabulary") {
+      next[key] = normalizeVocabulary(value);
+      continue;
+    }
     if (["cleanup", "historyEnabled", "launchAtLogin"].includes(key) && typeof value !== "boolean")
       throw new Error("Invalid setting value");
     if (key === "microphoneId" && (typeof value !== "string" || value.length > 256))
@@ -255,7 +264,7 @@ class Controller {
     this.idleRequired();
     const request = {
       id: randomUUID(),
-      settings: { ...this.state.settings },
+      settings: structuredClone(this.state.settings),
       abort: new AbortController(),
       target: null,
       submitted: false,
@@ -268,7 +277,7 @@ class Controller {
     try {
       request.target = await this.native.captureTarget();
       this.assertOwned(request);
-      return { requestId: request.id, settings: { ...request.settings } };
+      return { requestId: request.id, settings: structuredClone(request.settings) };
     } catch (error) {
       if (this.active === request) {
         this.active = null;
@@ -323,6 +332,8 @@ class Controller {
         audioPath,
         profile: request.settings.profile,
         cleanup: request.settings.cleanup,
+        vocabulary: request.settings.vocabulary,
+        format: request.settings.format,
         signal: request.abort.signal,
       });
       this.assertOwned(request);
@@ -354,6 +365,9 @@ class Controller {
         timings: result.timings,
         delivery: "pending",
         ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+        ...(result.candidateText
+          ? { candidateText: result.candidateText, reviewReasons: result.reviewReasons }
+          : {}),
         ...(result.warning
           ? { warning: result.warning }
           : request.settings.cleanup && !result.text.trim()
@@ -428,12 +442,21 @@ class Controller {
   }
 
   async copyTranscript(id, source) {
-    if (!["original", "edited"].includes(source)) throw new Error("Unknown transcript source");
+    if (!["original", "edited", "suggestion"].includes(source))
+      throw new Error("Unknown transcript source");
     this.idleRequired();
     const record =
       this.history.get(id) || (this.state.latest?.id === id ? this.state.latest : null);
     if (!record) throw new Error("Transcript not found");
-    this.clipboard.writeText(source === "original" ? record.rawText : record.text);
+    if (source === "suggestion" && !record.candidateText)
+      throw new Error("No suggested edit to copy");
+    this.clipboard.writeText(
+      source === "original"
+        ? record.rawText
+        : source === "suggestion"
+          ? record.candidateText
+          : record.text
+    );
   }
 
   rewriteTranscript(id) {
@@ -463,13 +486,20 @@ class Controller {
     try {
       const result = await this.inference.rewrite({
         text: record.text,
+        vocabulary: structuredClone(this.state.settings.vocabulary),
+        format: this.state.settings.format,
         signal: request.abort.signal,
       });
       this.assertOwned(request);
       const text = typeof result === "string" ? result : result?.text;
       if (typeof text !== "string" || !text.trim() || text.length > MAX_TEXT)
         throw new Error("The model returned an invalid rewrite");
-      const updated = this.history.update(id, { text });
+      const updated = this.history.update(id, {
+        text,
+        candidateText: result.candidateText,
+        reviewReasons: result.reviewReasons,
+        warning: result.warning,
+      });
       if (this.state.latest?.id === id) this.state.latest = updated;
       return updated;
     } catch (error) {

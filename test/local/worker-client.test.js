@@ -2,6 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { PassThrough, Writable } = require("node:stream");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
 const { AirWorkerClient } = require("../../desktop/air-worker-client");
 const { StudioClient } = require("../../desktop/studio-client");
 
@@ -118,6 +121,89 @@ test("missing model runtime does not spawn Python", async () => {
     spawnImpl: () => assert.fail("must not spawn"),
   });
   await assert.rejects(client.process({ audioPath: "/audio/x" }), { code: "LOCAL_NOT_READY" });
+  await client.shutdown();
+});
+
+test("Air sends per-request vocabulary and trained format selection to its worker", async () => {
+  let observed;
+  const { client } = workerFixture((request, child) => {
+    observed = request.params;
+    queueMicrotask(() =>
+      child.send({ v: 1, id: request.id, ok: true, result: { rawText: "raw", text: "clean" } })
+    );
+  });
+  const vocabulary = [{ word: "OpenSuperwhisper", aliases: ["open super whisper"] }];
+  try {
+    const result = await client.process({
+      audioPath: "/audio/x",
+      cleanup: true,
+      vocabulary,
+      format: "list",
+    });
+    assert.deepEqual(observed, {
+      audioPath: "/audio/x",
+      cleanup: true,
+      vocabulary,
+      format: "list",
+    });
+    assert.deepEqual(result, { rawText: "raw", text: "clean" });
+  } finally {
+    await client.shutdown();
+  }
+});
+
+test("Studio recognition sends canonical vocabulary only and omits an empty hint", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "osw-vocabulary-"));
+  const audioPath = path.join(directory, "fixture.wav");
+  await fs.writeFile(audioPath, "fixture");
+  const client = new StudioClient({ prompts: {} });
+  const requests = [];
+  client.connect = async () => ({ asr: "http://127.0.0.1:8766" });
+  client.json = async (_url, options) => {
+    requests.push(options.body);
+    return { text: "Transcript." };
+  };
+  try {
+    await client.transcribe({
+      audioPath,
+      vocabulary: [
+        { word: "OpenSuperwhisper", aliases: ["weapon super whisper"] },
+        { word: "Tailscale", aliases: [] },
+      ],
+    });
+    await client.transcribe({ audioPath });
+    assert.equal(requests[0].get("vocab"), "OpenSuperwhisper, Tailscale");
+    assert.equal(requests[0].get("file").name, "dictation.wav");
+    assert.equal(requests[1].has("vocab"), false);
+  } finally {
+    await client.shutdown();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Studio editing keeps personal vocabulary and format in JSON data", async () => {
+  const client = new StudioClient({
+    prompts: { cleanup: "fixed cleanup", rewrite: "fixed rewrite" },
+  });
+  client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
+  client.ensureEditor = async () => {};
+  let body;
+  client.json = async (_url, options) => {
+    body = JSON.parse(options.body);
+    return { output: [{ type: "message", content: "Edited." }] };
+  };
+  const vocabulary = [{ word: "OpenSuperwhisper", aliases: ["open super whisper"] }];
+  await client.edit({ text: 'Use "open super whisper".', vocabulary, format: "paragraphs" });
+  assert.equal(body.system_prompt, "fixed cleanup");
+  assert.deepEqual(JSON.parse(body.input), {
+    transcript: 'Use "open super whisper".',
+    vocabulary,
+    format: "paragraphs",
+  });
+  await client.edit({ text: "raw", vocabulary, rewrite: true, format: "list" });
+  assert.equal(body.system_prompt, "fixed rewrite");
+  assert.equal(JSON.parse(body.input).format, "list");
+  assert.match(JSON.parse(body.input).editing_instruction, /without changing meaning/);
   await client.shutdown();
 });
 

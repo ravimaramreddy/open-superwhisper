@@ -3,6 +3,7 @@ const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
 const net = require("node:net");
 const { abortError, throwIfAborted, awaitAbortable } = require("./air-worker-client");
+const { normalizeVocabulary } = require("./vocabulary");
 
 function unavailable(message, cause) {
   return Object.assign(new Error(message, { cause }), { code: "STUDIO_UNAVAILABLE" });
@@ -167,7 +168,7 @@ class StudioClient {
     }
   }
 
-  async transcribe({ audioPath, signal }) {
+  async transcribe({ audioPath, vocabulary = [], signal }) {
     signal = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
     throwIfAborted(signal);
     try {
@@ -179,6 +180,10 @@ class StudioClient {
         new Blob([await fs.readFile(audioPath)], { type: "audio/wav" }),
         "dictation.wav"
       );
+      // Recognition needs the desired spellings, not the mishearings we correct
+      // later. The existing speech service accepts this per-request hint field.
+      const words = normalizeVocabulary(vocabulary).map((entry) => entry.word);
+      if (words.length) body.append("vocab", words.join(", "));
       this.onProgress("Transcribing on Mac Studio");
       const result = await this.json(
         `${tunnel.asr}/transcribe`,
@@ -281,7 +286,7 @@ class StudioClient {
     }
   }
 
-  async edit({ text, rewrite = false, signal }) {
+  async edit({ text, rewrite = false, vocabulary = [], format = "prose", signal }) {
     signal = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
     throwIfAborted(signal);
     if (!text.trim()) return "";
@@ -292,7 +297,11 @@ class StudioClient {
     this.onProgress(
       rewrite ? "Improving the wording on Mac Studio" : "Correcting text on Mac Studio"
     );
-    const input = { transcript: text };
+    const input = {
+      transcript: text,
+      vocabulary: normalizeVocabulary(vocabulary),
+      format: ["paragraphs", "list"].includes(format) ? format : "prose",
+    };
     if (rewrite)
       input.editing_instruction = "Improve clarity and organization without changing meaning.";
     const result = await this.json(

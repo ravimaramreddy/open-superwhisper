@@ -14,10 +14,32 @@ export function createPreviewAPI(): LocalWhisprAPI {
     timings: { asrMs: 600, cleanupMs: 380, totalMs: 980 },
     delivery: "clipboard-only",
   };
+  const guardedSample: Transcript = {
+    ...sample,
+    id: "preview-review",
+    rawText: "please keep fifteen seats for the review not fifty",
+    text: "please keep fifteen seats for the review not fifty",
+    candidateText: "Please keep fifty seats for the review.",
+    reviewReasons: ["The suggested edit may have changed a number or removed a negation."],
+    cleanupStatus: "applied",
+    delivery: "dispatched",
+    durationMs: 6100,
+  };
   let state: AppState = {
     settings: {
       profile: "auto",
       cleanup: true,
+      format: "prose",
+      vocabulary: [
+        { word: "OpenSuperwhisper", aliases: [] },
+        { word: "OpenWhispr", aliases: [] },
+        { word: "Superwhisper", aliases: [] },
+        { word: "Qwen", aliases: [] },
+        { word: "Gemma", aliases: [] },
+        { word: "Tailscale", aliases: [] },
+        { word: "Codex", aliases: [] },
+        { word: "Mac Studio", aliases: [] },
+      ],
       microphoneId: "default",
       hotkey: "CommandOrControl+Shift+Space",
       historyEnabled: true,
@@ -28,8 +50,8 @@ export function createPreviewAPI(): LocalWhisprAPI {
     studio: "ready",
     phase: "idle",
     progress: "",
-    history: [sample],
-    latest: sample,
+    history: [guardedSample, sample],
+    latest: guardedSample,
     error: null,
   };
   const listeners = new Set<(state: AppState) => void>();

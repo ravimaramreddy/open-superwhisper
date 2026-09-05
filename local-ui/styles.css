@@ -13,7 +13,8 @@ body {
 }
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 button {
@@ -22,7 +23,8 @@ button {
 }
 button:disabled,
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   cursor: default;
   opacity: 0.45;
 }
@@ -31,12 +33,14 @@ button {
 }
 button,
 select,
-input {
+input,
+textarea {
   outline: none;
 }
 button:focus-visible,
 select:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible {
   outline: 3px solid #4079ed60;
   outline-offset: 3px;
 }
@@ -606,6 +610,174 @@ kbd {
 .rewrite-button {
   color: #597ec8;
 }
+.review-suggestion {
+  border: 1px solid #e7dcc9;
+  border-radius: 7px;
+  background: #fcfaf5;
+  margin-top: 13px;
+  padding: 11px 13px;
+}
+.review-suggestion summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #87673b;
+  cursor: pointer;
+  list-style: none;
+}
+.review-suggestion summary::-webkit-details-marker {
+  display: none;
+}
+.review-suggestion summary::after {
+  content: "+";
+  margin-left: auto;
+  font-size: 15px;
+}
+.review-suggestion[open] summary::after {
+  content: "−";
+}
+.review-suggestion summary:focus-visible {
+  outline: 3px solid #4079ed60;
+  outline-offset: 3px;
+}
+.review-explanation,
+.review-suggestion ul {
+  font-size: 10px;
+  color: #8b775b;
+  margin-top: 10px;
+}
+.review-suggestion ul {
+  padding-left: 16px;
+  line-height: 1.6;
+}
+.review-suggestion > .text-button {
+  margin-top: 13px;
+}
+.remember-form {
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.remember-form h3 {
+  font-size: 11px;
+  font-weight: 500;
+}
+.vocabulary-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 19px;
+}
+.vocabulary-heading p {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 5px;
+  max-width: 330px;
+}
+.vocabulary-card > .vocabulary-form {
+  padding: 0 19px 18px;
+  margin-top: 0;
+}
+.vocabulary-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 19px;
+  border-top: 1px solid #edeef0;
+}
+.vocabulary-term {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.vocabulary-term > span {
+  font-size: 12px;
+  font-weight: 500;
+}
+.vocabulary-term p {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 3px;
+}
+.vocabulary-entry .delete-button {
+  margin-left: 0;
+}
+.vocabulary-form {
+  width: 100%;
+  margin-top: 13px;
+}
+.vocabulary-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+  align-items: start;
+}
+.vocabulary-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 500;
+  color: #5f6876;
+}
+.vocabulary-fields input,
+.vocabulary-fields textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #dadfe5;
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.vocabulary-fields textarea {
+  resize: vertical;
+  min-height: 34px;
+}
+.vocabulary-fields input::placeholder,
+.vocabulary-fields textarea::placeholder {
+  color: #9b9fa7;
+}
+.form-hint,
+.form-error {
+  margin-top: 9px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.form-error {
+  color: #9d533e;
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 12px;
+}
+.save-button {
+  color: var(--blue);
+}
+.vocabulary-footnote,
+.vocabulary-empty {
+  color: var(--muted);
+  font-size: 10px;
+  padding: 13px 19px;
+}
+.vocabulary-footnote {
+  border-top: 1px solid #edeef0;
+}
+.vocabulary-footnote > span {
+  display: block;
+  margin-top: 5px;
+  color: #969ca5;
+}
 .settings-group {
   margin-bottom: 27px;
 }
@@ -892,6 +1064,17 @@ select {
   }
   .setting-row {
     flex-wrap: wrap;
+  }
+  .vocabulary-heading {
+    padding: 15px;
+    gap: 12px;
+  }
+  .vocabulary-entry,
+  .vocabulary-footnote {
+    padding-inline: 15px;
+  }
+  .vocabulary-fields {
+    grid-template-columns: 1fr;
   }
   .route-setting .segmented {
     margin-top: 0;

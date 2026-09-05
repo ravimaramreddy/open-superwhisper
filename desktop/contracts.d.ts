@@ -1,7 +1,13 @@
 export type Profile = "auto" | "studio" | "air";
+export interface VocabularyEntry {
+  word: string;
+  aliases: string[];
+}
 export interface Settings {
   profile: Profile;
   cleanup: boolean;
+  format: "prose" | "paragraphs" | "list";
+  vocabulary: VocabularyEntry[];
   microphoneId: string;
   hotkey: string;
   historyEnabled: boolean;
@@ -20,6 +26,8 @@ export interface Transcript {
   cleanupStatus: "off" | "applied" | "failed";
   fallbackReason?: string;
   warning?: string;
+  candidateText?: string;
+  reviewReasons?: string[];
   durationMs: number;
   timings: { asrMs: number; cleanupMs: number; totalMs: number };
   delivery: "pending" | "dispatched" | "clipboard-only" | "uncertain" | "cancelled";
@@ -52,7 +60,7 @@ export interface LocalWhisprAPI {
     durationMs: number;
   }): Promise<Transcript | null>;
   cancel(requestId?: string): Promise<void>;
-  copyTranscript(id: string, source: "original" | "edited"): Promise<void>;
+  copyTranscript(id: string, source: "original" | "edited" | "suggestion"): Promise<void>;
   rewriteTranscript(id: string): Promise<Transcript>;
   deleteTranscript(id: string): Promise<AppState>;
   hideWindow(): Promise<void>;

@@ -86,7 +86,7 @@ pending transcript/rewrite cleanup before terminating. Active-work shutdown is
 covered by controlled tests; quitting during a live microphone recording remains
 a separate manual check.
 
-## Studio cleanup follow-up
+## Studio cleanup follow-up (before personal vocabulary)
 
 The original cleanup prompt often made only punctuation-level changes and kept
 abandoned starts or explicit corrections. The revised Studio prompt gives
@@ -115,5 +115,31 @@ Empty input returns empty. A filler-only completion was empty, so the existing
 runtime treated correction as unavailable and preserved the original. This
 fallback behavior has not been changed. Raw transcripts remain available.
 
-This update changes Studio cleanup only. The Air fallback still uses its tested
+That update changed Studio cleanup only. The Air fallback still uses its tested
 S1-mini normalizer and existing prompt. No models or services were replaced.
+
+## Personal vocabulary and reviewable edits
+
+The editable dictionary replaces the fixed names and pronunciation exception
+described above. The initial eight spellings have no mandatory aliases; users
+explicitly save recurring mishearings. There is no blanket “weapon” replacement.
+
+Read-only inspection confirmed the running Studio API supports multipart `vocab`
+and the installed Air mlx-audio Qwen supports native `hotwords`. Public audiobook
+clips succeeded with relevant and unrelated hints on both machines without
+observed contamination. Identical transcripts establish compatibility, not an
+accuracy improvement. No shared service, model or machine configuration changed.
+
+Real Studio probes cover grammar, vocabulary, distinct app names, list/paragraph
+guidance, numeric self-corrections, decimals, negative amounts, code, uncertainty
+and quotes. A changed quote was retained for review instead of being applied.
+The real Air worker preserved proper names and produced a list using S1's
+documented controls. These are development probes, not a held-out personal-speech
+evaluation. No personal recordings were collected.
+
+Regression cases cover dictionary limits/collisions, Unicode and quote boundaries,
+canonical-name protection, signed amounts, decimal rendering, numeric correction,
+negation loss, both route integrations, immutable settings snapshots, additive
+history metadata, explicit suggestion copying and no second automatic paste.
+Checks remain heuristic: ambiguous spoken years may be flagged, while changed
+unknown names, units or reordered facts can escape. Original ASR remains available.

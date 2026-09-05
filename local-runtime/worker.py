@@ -19,6 +19,35 @@ S1_CONTROLS = "[Styling: semi-formal] [Structure: prose] [Context: general]\n"
 MAX_TOKENS = 512
 
 
+def vocabulary_words(entries):
+    """Bound model context even if the internal worker request is malformed."""
+    if not isinstance(entries, list) or len(entries) > 32:
+        raise ValueError("Vocabulary must contain at most 32 words")
+    words = []
+    seen = set()
+    for entry in entries:
+        word = entry.get("word") if isinstance(entry, dict) else None
+        if (
+            not isinstance(word, str)
+            or not 1 <= len(word.strip()) <= 80
+            or any(ord(char) < 32 or ord(char) == 127 for char in word)
+        ):
+            raise ValueError("Vocabulary words must be short, single-line text")
+        word = word.strip()
+        if word.casefold() not in seen:
+            words.append(word)
+            seen.add(word.casefold())
+    return words
+
+
+def s1_controls(format):
+    # S1 is trained on these exact controls, not arbitrary editing instructions.
+    # Its prose option already permits paragraphs; lists requires an enumeration.
+    if format == "list":
+        return "[Styling: semi-formal] [Structure: lists] [Context: general]\n"
+    return S1_CONTROLS
+
+
 def validate_wav(filename, audio_root):
     path = Path(filename).resolve(strict=True)
     if not path.is_relative_to(Path(audio_root).resolve()) or not path.is_file():
@@ -53,7 +82,7 @@ class Engine:
             self.asr = load(self.qwen_path, strict=True)
             mx.synchronize()
 
-    def clean(self, text):
+    def clean(self, text, format="prose"):
         if not text.strip():
             return ""
         from mlx_lm import load, stream_generate
@@ -66,7 +95,7 @@ class Engine:
         prompt = self.tokenizer.apply_chat_template(
             [
                 {"role": "system", "content": S1_SYSTEM},
-                {"role": "user", "content": S1_CONTROLS + text},
+                {"role": "user", "content": s1_controls(format) + text},
             ],
             tokenize=False,
             add_generation_prompt=True,
@@ -93,6 +122,7 @@ class Engine:
 
     def process(self, params):
         audio = validate_wav(params["audioPath"], self.audio_root)
+        words = vocabulary_words(params.get("vocabulary", []))
         started = time.perf_counter()
         self.load_asr()
         self.report("Transcribing locally")
@@ -102,6 +132,7 @@ class Engine:
             max_tokens=MAX_TOKENS,
             temperature=0.0,
             verbose=False,
+            hotwords=words,
         )
         self.mx.synchronize()
         raw = result.text.strip()
@@ -113,7 +144,7 @@ class Engine:
         text, status, warning = raw, "off", None
         if params.get("cleanup"):
             try:
-                text = self.clean(raw)
+                text = self.clean(raw, format=params.get("format", "prose"))
                 status = "applied"
             except Exception as error:  # noqa: BLE001 — every correction failure must preserve the raw transcript.
                 status, warning = "failed", str(error)

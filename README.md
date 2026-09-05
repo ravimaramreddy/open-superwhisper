@@ -15,6 +15,32 @@ keeps the original transcript and shows a warning. Choosing Studio explicitly do
 not silently switch machines. **Rewrite with Studio** is a separate, deliberate
 action: review and copy its result yourself.
 
+## Your words and English cleanup
+
+**Settings → Personal vocabulary** saves up to 32 preferred spellings, each with
+up to four optional misheard phrases. **Remember a correction** in a transcript
+adds a spelling/alias for future dictation without changing the saved transcript.
+Keep the list short and relevant. Every built-in name can be edited or removed.
+
+Preferred spellings are sent to Qwen during recognition. Aliases are exact,
+case-insensitive whole phrases, not fuzzy guesses. Quote/code spans, URLs, paths
+and existing canonical names are protected. A saved alias is an explicit rule:
+avoid common words that can legitimately mean something else. Studio also sees
+the dictionary when editing. The Air's S1 uses its trained prompt; exact spelling
+corrections are applied afterward. **Copy original** retains the untouched ASR
+output. Turning cleanup off leaves that output as the delivered text.
+
+**Clean English** repairs grammar and false starts. Choose prose, paragraphs or
+a list; paragraph guidance applies to Studio, while the Air uses S1's trained
+prose/list styles. **Rewrite with Studio** remains a separate action.
+
+Both paths check selected changes to numbers, negatives/exclusions, dictionary
+names and quoted/technical text. A flagged edit keeps the previous text and
+stores a suggested edit with reasons. Review and **Copy suggestion** explicitly
+if wanted; suggestions are never automatically pasted. These are conservative
+checks, not a guarantee: they can flag legitimate edits and miss changed meaning,
+including unknown names or reordered facts. S1 cleanup is English-only.
+
 ## First use
 
 This build targets Apple silicon Macs. Local setup requires
@@ -53,7 +79,8 @@ already work. A private override can be placed in
 
 Keep this file out of version control. The speech service must provide
 `GET /health` with `status: "healthy"` and `POST /transcribe` accepting a WAV
-multipart `file` and returning `text`. This personal build expects the existing
+multipart `file`, optional `vocab` (comma-separated preferred spellings), and
+returning `text`. This personal build expects the existing
 LM Studio installation and `google/gemma-4-e4b` model on Studio. The app loads an
 instance with its own unique identifier, disables reasoning for editing, gives
 it a five-minute idle lifetime, and unloads only its own instance when closing.
@@ -68,7 +95,7 @@ it a five-minute idle lifetime, and unloads only its own instance when closing.
   Raw text is saved before automatic delivery when history is enabled.
 - If focus changes, text stays on the clipboard. An uncertain paste is never
   automatically retried: check the target before pasting again.
-- Cleanup models can change meaning. Disable cleanup when exact wording matters,
+- Cleanup models can change meaning despite the review checks. Disable cleanup when exact wording matters,
   or recover **Copy original** from the latest dictation or History.
 - App data lives in `~/Library/Application Support/OpenSuperwhisper` and is
   separate from OpenWhispr. Voice processing uses your Macs; installation obtains

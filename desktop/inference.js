@@ -6,6 +6,8 @@ const { createHash } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { AirWorkerClient, throwIfAborted } = require("./air-worker-client");
 const { StudioClient } = require("./studio-client");
+const { normalizeVocabulary, applyVocabulary } = require("./vocabulary");
+const { reviewEdit } = require("./edit-review");
 
 function resourceRoot(resourcesPath) {
   const candidates = [
@@ -255,7 +257,16 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     }
   }
 
-  async function processWav({ audioPath, profile = "auto", cleanup = true, signal }) {
+  async function processWav({
+    audioPath,
+    profile = "auto",
+    cleanup = true,
+    vocabulary = [],
+    format = "prose",
+    signal,
+  }) {
+    vocabulary = normalizeVocabulary(vocabulary);
+    if (!["prose", "paragraphs", "list"].includes(format)) throw new Error("Invalid text format");
     signal = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     return exclusive(async () => {
       if (!["auto", "studio", "air"].includes(profile)) throw new Error("Unknown speech profile");
@@ -268,10 +279,13 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
             ? "Mac Studio is unavailable; using local models"
             : "Starting local speech recognition"
         );
-        const result = await air.process({ audioPath, cleanup, signal });
+        const result = await air.process({ audioPath, cleanup, vocabulary, format, signal });
         throwIfAborted(signal);
         return {
           ...result,
+          ...(cleanup && result.cleanupStatus === "applied"
+            ? reviewEdit(result.rawText, result.text, vocabulary)
+            : {}),
           actualProfile: "air",
           ...(fallbackReason ? { fallbackReason } : {}),
           timings: { ...result.timings, totalMs: now() - started },
@@ -280,7 +294,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
       if (profile === "air") return local();
       let rawText;
       try {
-        rawText = await studio.transcribe({ audioPath, signal });
+        rawText = await studio.transcribe({ audioPath, vocabulary, signal });
       } catch (error) {
         throwIfAborted(signal);
         if (profile === "auto" && error.code === "STUDIO_UNAVAILABLE")
@@ -294,7 +308,12 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
         warning;
       if (cleanup) {
         try {
-          text = await studio.edit({ text: rawText, signal });
+          text = await studio.edit({
+            text: applyVocabulary(rawText, vocabulary),
+            vocabulary,
+            format,
+            signal,
+          });
           throwIfAborted(signal);
           cleanupStatus = "applied";
         } catch (error) {
@@ -311,6 +330,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
         actualProfile: "studio",
         cleanupStatus,
         ...(warning ? { warning } : {}),
+        ...(cleanupStatus === "applied" ? reviewEdit(rawText, text, vocabulary) : {}),
         timings: {
           asrMs: afterAsr - started,
           cleanupMs: finished - afterAsr,
@@ -320,15 +340,26 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     }, signal);
   }
 
-  async function rewrite({ text, signal }) {
+  async function rewrite({ text, vocabulary = [], format = "prose", signal }) {
+    vocabulary = normalizeVocabulary(vocabulary);
+    if (!["prose", "paragraphs", "list"].includes(format)) throw new Error("Invalid text format");
     signal = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     return exclusive(async () => {
       if (typeof text !== "string" || text.length > 32768)
         throw new Error("Invalid or oversized transcript");
       const started = now();
-      const output = await studio.edit({ text, rewrite: true, signal });
+      const output = await studio.edit({
+        text: applyVocabulary(text, vocabulary),
+        vocabulary,
+        format,
+        rewrite: true,
+        signal,
+      });
       throwIfAborted(signal);
-      return { text: output, timings: { cleanupMs: now() - started, totalMs: now() - started } };
+      return {
+        ...reviewEdit(text, output, vocabulary),
+        timings: { cleanupMs: now() - started, totalMs: now() - started },
+      };
     }, signal);
   }
 

@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { Controller, validateWav } = require("../../desktop/controller");
 const { History } = require("../../desktop/history");
+const { DEFAULT_SETTINGS, normalizeSettings } = require("../../desktop/controller");
 
 function deferred() {
   let resolve;
@@ -77,6 +78,71 @@ function harness(t, overrides = {}) {
   });
   return { controller, history, calls, directory };
 }
+
+test("old preferences gain dictionary/format defaults and save custom vocabulary across restart", async (t) => {
+  const { controller, directory } = harness(t);
+  const words = [{ word: "Quartz", aliases: ["quarts"] }];
+  await controller.updateSettings({ vocabulary: words, format: "list", launchAtLogin: true });
+  words[0].aliases.push("mutated");
+  assert.deepEqual(controller.getState().settings.vocabulary[0].aliases, ["quarts"]);
+  const stored = JSON.parse(fs.readFileSync(path.join(directory, "settings.json")));
+  assert.equal(stored.launchAtLogin, true);
+  assert.equal(stored.format, "list");
+  assert.deepEqual(stored.vocabulary, [{ word: "Quartz", aliases: ["quarts"] }]);
+  const old = normalizeSettings({ profile: "air", cleanup: false, launchAtLogin: true });
+  assert.equal(old.format, "prose");
+  assert.deepEqual(old.vocabulary, DEFAULT_SETTINGS.vocabulary);
+  assert.equal(old.profile, "air");
+  assert.equal(old.cleanup, false);
+  await assert.rejects(controller.updateSettings({ vocabulary: [{ word: "a", aliases: ["a"] }] }));
+  assert.deepEqual(controller.getState().settings.vocabulary, stored.vocabulary);
+});
+
+test("recording snapshots dictionary and format; later settings only affect future recordings", async (t) => {
+  const { controller, calls } = harness(t);
+  await controller.updateSettings({
+    vocabulary: [{ word: "Quartz", aliases: [] }],
+    format: "list",
+  });
+  const session = await controller.beginRecording();
+  session.settings.vocabulary[0].word = "Mutated";
+  await controller.updateSettings({ vocabulary: [], format: "prose" });
+  await controller.transcribe({ requestId: session.requestId, audio: wav(), durationMs: 100 });
+  assert.equal(calls.inference[0].vocabulary[0].word, "Quartz");
+  assert.equal(calls.inference[0].format, "list");
+});
+
+test("guarded correction pastes kept text once, persists candidate and copies only on request", async (t) => {
+  const { controller, calls, history, directory } = harness(t, {
+    inference: {
+      processWav: async () => ({
+        ...modelResult(),
+        text: "keep the original",
+        candidateText: "Different suggestion.",
+        reviewReasons: ["A saved name changed."],
+        warning: "Original kept.",
+      }),
+    },
+  });
+  const session = await controller.beginRecording();
+  const row = await controller.transcribe({
+    requestId: session.requestId,
+    audio: wav(),
+    durationMs: 100,
+  });
+  assert.equal(calls.delivery[0].text, "keep the original");
+  assert.equal(calls.delivery.length, 1);
+  const reloaded = new History(path.join(directory, "history.json")).get(row.id);
+  assert.equal(reloaded.candidateText, "Different suggestion.");
+  assert.deepEqual(reloaded.reviewReasons, ["A saved name changed."]);
+  assert.equal(calls.copy.length, 0);
+  await controller.copyTranscript(row.id, "suggestion");
+  assert.deepEqual(calls.copy, ["Different suggestion."]);
+  await controller.rewriteTranscript(row.id);
+  assert.equal(history.get(row.id).candidateText, undefined);
+  assert.equal(history.get(row.id).rawText, "keep the original");
+  assert.equal(calls.delivery.length, 1);
+});
 
 test("duplicate submissions share one inference, history row and delivery", async (t) => {
   const { controller, history, calls } = harness(t);

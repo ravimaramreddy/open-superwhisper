@@ -9,6 +9,8 @@ provider catalog, sync, calendar, meeting, chat, search or embedding services.
 | `desktop/main.js` / `preload.js` | Window, tray, shortcut, permissions and narrow IPC bridge    |
 | `desktop/controller.js`          | Recording ownership, cancellation, save-before-delivery      |
 | `desktop/history.js`             | Atomic, bounded history; immutable original; delivery claims |
+| `desktop/vocabulary.js`          | Bounded dictionary validation and protected phrase matching |
+| `desktop/edit-review.js`         | Best-effort checks; retained text plus reviewable suggestions |
 | `desktop/native.js`              | Frontmost-app check, clipboard and single paste attempt      |
 | `resources/macos-local-paste.mm` | Native target validation and keyboard dispatch               |
 | `desktop/inference.js`           | Fixed profiles, fallback, setup and lifetime                 |
@@ -31,6 +33,20 @@ Only one inference request owns the recording. Automatic mode first tries Studio
 ASR, falls back to local ASR when unavailable, then applies the matching optional
 editor. Correction failure retains raw text. Cancellation invalidates the owner
 and aborts the local worker/request so late completions cannot initiate delivery.
+
+Settings snapshots include a deep copy of vocabulary and the formatting choice.
+Older settings receive defaults without replacing saved microphone, shortcut,
+login, profile or history preferences. Vocabulary uses the existing serialized,
+atomic settings update path and remains private app data.
+
+Studio receives canonical vocabulary as multipart `vocab`; the pinned Air Qwen
+runtime receives native `hotwords`. Aliases are not recognition hints. Both
+profiles pass successful edits through the same main-process review checks.
+Review compares against a spelling-normalized baseline but preserves the actual
+raw ASR when it flags an automatic edit. Optional `candidateText`/`reviewReasons`
+are stored alongside the retained text in version-1 history. A deliberate rewrite
+keeps the previous edited text when flagged; raw ASR is always immutable. Only an
+explicit Copy suggestion action copies the candidate, never a second paste.
 
 History is saved before delivery and claims each automatic delivery once. The
 native addon checks the focused process immediately before dispatching ⌘V. It

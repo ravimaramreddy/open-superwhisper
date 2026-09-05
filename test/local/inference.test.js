@@ -47,6 +47,45 @@ function fixture(overrides = {}) {
 }
 const request = { audioPath: "/private/tmp/osw-test/audio.wav", profile: "auto", cleanup: true };
 
+test("dictionary reaches ASR/editor and explicit spelling corrections retain raw ASR", async () => {
+  const vocabulary = [{ word: "Quartz", aliases: ["quarts"] }];
+  const { instance } = fixture({
+    studio: {
+      transcribe: async (args) => {
+        assert.deepEqual(args.vocabulary, vocabulary);
+        return "use quarts";
+      },
+      edit: async (args) => {
+        assert.equal(args.text, "use Quartz");
+        assert.equal(args.format, "list");
+        return "Use Quartz.";
+      },
+    },
+  });
+  const result = await instance.processWav({ ...request, vocabulary, format: "list" });
+  assert.equal(result.rawText, "use quarts");
+  assert.equal(result.text, "Use Quartz.");
+});
+
+test("both profiles retain original and candidate when cleanup changes a protected number", async () => {
+  for (const profile of ["studio", "air"]) {
+    const { instance } = fixture({
+      studio: { transcribe: async () => "send 15 copies", edit: async () => "Send 50 copies." },
+      air: {
+        process: async (args) => {
+          assert.equal(args.format, "paragraphs");
+          return { ...airResult, rawText: "send 15 copies", text: "Send 50 copies." };
+        },
+      },
+    });
+    const result = await instance.processWav({ ...request, profile, format: "paragraphs" });
+    assert.equal(result.rawText, "send 15 copies");
+    assert.equal(result.text, result.rawText);
+    assert.equal(result.candidateText, "Send 50 copies.");
+    assert.ok(result.reviewReasons.some((reason) => reason.includes("number")));
+  }
+});
+
 test("Studio success preserves raw transcript and avoids the Air", async () => {
   const { instance, calls } = fixture();
   const result = await instance.processWav(request);

@@ -17,7 +17,14 @@ uv run --no-project --python 3.13.14 scripts/setup-local-runtime.py \
 
 Seeds are copied only after hash verification. Missing or invalid seed files are downloaded from the pinned public Hugging Face revision. License/card files are bundled and also copied into the model directory. Package installation may use the network. No GPU inference happens during setup.
 
-The worker receives newline-delimited JSON on stdin. Its stdout contains only the versioned protocol; library and native output goes to stderr. A request has `v:1`, a string `id`, `method:"process"`, and `params:{audioPath,cleanup}`. The file must resolve beneath the app's user data directory and contain 16 kHz mono PCM16 WAV, at most 120 seconds. Successful replies have `ok:true` and the application's transcript result. Errors have `ok:false` and `{code,message}`. The worker accepts only one request at a time. Model work stays on the main Python thread.
+The worker receives newline-delimited JSON on stdin. Its stdout contains only the versioned protocol; library and native output goes to stderr. A request has `v:1`, a string `id`, `method:"process"`, and `params:{audioPath,cleanup,vocabulary,format}`. Vocabulary is an optional list of `{word,aliases}` entries; format is `prose`, `paragraphs` or `list`. The file must resolve beneath the app's user data directory and contain 16 kHz mono PCM16 WAV, at most 120 seconds. Successful replies have `ok:true` and the application's transcript result. Errors have `ok:false` and `{code,message}`. The worker accepts only one request at a time. Model work stays on the main Python thread.
+
+Canonical words go to Qwen's `hotwords`; aliases do not. S1's exact system prompt
+is unchanged and the format choice maps to its trained `prose`/`lists` control.
+Paragraphs use prose locally. The JS inference layer applies exact vocabulary
+corrections and reviews successful output before delivery; worker originals are
+never replaced. Studio's existing ASR service accepts a comma-separated `vocab`
+multipart field, and the editor receives vocabulary/format as JSON data.
 
 Correction errors, empty correction output, and correction token-limit exhaustion preserve the raw transcript with a warning. Recognition token-limit exhaustion is an error requiring a shorter recording. These guards do not detect every semantic editing mistake; the application retains the original text for review.
 

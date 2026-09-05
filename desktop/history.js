@@ -52,7 +52,19 @@ function validRecord(record) {
     ["warning", "fallbackReason"].every(
       (key) =>
         record[key] === undefined || (typeof record[key] === "string" && record[key].length <= 4000)
-    )
+    ) &&
+    (record.candidateText === undefined ||
+      (typeof record.candidateText === "string" &&
+        record.candidateText.length > 0 &&
+        record.candidateText.length <= MAX_TEXT)) &&
+    (record.reviewReasons === undefined ||
+      (Array.isArray(record.reviewReasons) &&
+        record.reviewReasons.length > 0 &&
+        record.reviewReasons.length <= 8 &&
+        record.reviewReasons.every(
+          (reason) => typeof reason === "string" && reason.length > 0 && reason.length <= 500
+        ))) &&
+    Boolean(record.candidateText) === Boolean(record.reviewReasons)
   );
 }
 
@@ -144,7 +156,7 @@ class History {
     if (!current) throw new Error("Transcript not found");
     // Rewrites and delivery changes cannot replace original ASR output or identity.
     const allowed = {};
-    for (const key of ["text", "warning", "delivery"])
+    for (const key of ["text", "warning", "delivery", "candidateText", "reviewReasons"])
       if (Object.hasOwn(changes, key)) allowed[key] = changes[key];
     const updated = { ...current, ...allowed };
     if (!validRecord(updated)) throw new Error("Invalid transcript update");

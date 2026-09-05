@@ -1,5 +1,6 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
+const { normalizeVocabulary } = require("./vocabulary");
 
 function abortError() {
   return Object.assign(new Error("Cancelled"), { name: "AbortError", code: "CANCELLED" });
@@ -185,8 +186,14 @@ class AirWorkerClient {
     return this.closing;
   }
 
-  async process({ audioPath, cleanup, signal }) {
+  async process({ audioPath, cleanup, vocabulary = [], format = "prose", signal }) {
     throwIfAborted(signal);
+    const params = {
+      audioPath,
+      cleanup,
+      vocabulary: normalizeVocabulary(vocabulary),
+      format: ["paragraphs", "list"].includes(format) ? format : "prose",
+    };
     if (this.busy)
       throw Object.assign(new Error("Local inference is already running"), { code: "BUSY" });
     this.busy = true;
@@ -203,7 +210,12 @@ class AirWorkerClient {
         state.pending = { id, resolve, reject };
         timer = setTimeout(() => this.stop(new Error("Local inference timed out")), this.requestMs);
         state.child.stdin.write(
-          JSON.stringify({ v: 1, id, method: "process", params: { audioPath, cleanup } }) + "\n"
+          JSON.stringify({
+            v: 1,
+            id,
+            method: "process",
+            params,
+          }) + "\n"
         );
       });
       throwIfAborted(signal);

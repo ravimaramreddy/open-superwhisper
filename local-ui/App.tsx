@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AudioLines,
+  BookOpen,
   Check,
   ChevronRight,
   Circle,
@@ -11,6 +12,8 @@ import {
   LoaderCircle,
   Mic,
   Monitor,
+  Pencil,
+  Plus,
   RefreshCw,
   Settings2,
   ShieldCheck,
@@ -36,6 +39,111 @@ const shortcutLabel = (value: string) =>
     .replace("Space", "Space");
 const timeLabel = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+type VocabularyEntry = Settings["vocabulary"][number];
+const cleanTerm = (value: string) => value.trim().replace(/\s+/g, " ");
+const termKey = (value: string) => cleanTerm(value).toLocaleLowerCase("en");
+
+function VocabularyForm({
+  initial,
+  correction = false,
+  disabled,
+  onSave,
+  onCancel,
+}: {
+  initial?: VocabularyEntry;
+  correction?: boolean;
+  disabled: boolean;
+  onSave: (entry: VocabularyEntry) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [word, setWord] = useState(initial?.word || "");
+  const [aliases, setAliases] = useState(initial?.aliases.join("\n") || "");
+  const [validation, setValidation] = useState("");
+  return (
+    <form
+      className="vocabulary-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const canonical = cleanTerm(word);
+        const phrases = aliases.split("\n").map(cleanTerm).filter(Boolean);
+        if (!canonical || (correction && !phrases.length)) {
+          setValidation(t("vocabularyRequired"));
+          return;
+        }
+        if (canonical.length > 80 || phrases.some((value) => value.length > 80)) {
+          setValidation(t("vocabularyLength"));
+          return;
+        }
+        if (phrases.length > 4) {
+          setValidation(t("vocabularyAliasLimit"));
+          return;
+        }
+        const unique = [...new Map(phrases.map((value) => [termKey(value), value])).values()];
+        if (unique.some((value) => termKey(value) === termKey(canonical))) {
+          setValidation(t("vocabularySamePhrase"));
+          return;
+        }
+        setValidation("");
+        onSave({ word: canonical, aliases: unique });
+      }}
+    >
+      <div className="vocabulary-fields">
+        <label>
+          <span>{t("correctSpelling")}</span>
+          <input
+            autoFocus
+            value={word}
+            maxLength={80}
+            disabled={disabled}
+            onChange={(event) => setWord(event.target.value)}
+            placeholder={t("wordPlaceholder")}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          <span>{t(correction ? "misheardPhrase" : "aliases")}</span>
+          {correction ? (
+            <input
+              value={aliases}
+              maxLength={80}
+              disabled={disabled}
+              onChange={(event) => setAliases(event.target.value)}
+              placeholder={t("aliasPlaceholder")}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          ) : (
+            <textarea
+              value={aliases}
+              rows={3}
+              disabled={disabled}
+              onChange={(event) => setAliases(event.target.value)}
+              placeholder={t("aliasesPlaceholder")}
+              spellCheck={false}
+            />
+          )}
+        </label>
+      </div>
+      <p className="form-hint">{t(correction ? "rememberDetail" : "aliasesDetail")}</p>
+      {validation && (
+        <p className="form-error" role="alert">
+          {validation}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="submit" className="small-button save-button" disabled={disabled}>
+          <Check size={13} />
+          {t(correction ? "remember" : "saveWord")}
+        </button>
+        <button type="button" className="text-button" disabled={disabled} onClick={onCancel}>
+          {t("cancel")}
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export default function App({ preview = false }: { preview?: boolean }) {
   const { t } = useTranslation();
@@ -47,6 +155,8 @@ export default function App({ preview = false }: { preview?: boolean }) {
   const [action, setAction] = useState<string | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [shortcutArmed, setShortcutArmed] = useState(false);
+  const [vocabularyEditing, setVocabularyEditing] = useState<number | null>(null);
+  const [rememberId, setRememberId] = useState<string | null>(null);
   const controller = useRef<CaptureController | null>(null);
   const stateRef = useRef<AppState | null>(null);
   const actionRef = useRef(false);
@@ -172,6 +282,39 @@ export default function App({ preview = false }: { preview?: boolean }) {
     [api, t]
   );
   const save = (patch: Partial<Settings>) => perform("settings", () => api.updateSettings(patch));
+  const saveVocabulary = (entry: VocabularyEntry, index: number | null, remembering = false) => {
+    void perform(
+      "vocabulary",
+      async () => {
+        const vocabulary = [...(stateRef.current?.settings.vocabulary || [])];
+        const existingIndex = vocabulary.findIndex(
+          (item) => termKey(item.word) === termKey(entry.word)
+        );
+        if (remembering && existingIndex !== -1) {
+          const existing = vocabulary[existingIndex];
+          const aliases = [
+            ...new Map(
+              [...existing.aliases, ...entry.aliases].map((value) => [termKey(value), value])
+            ).values(),
+          ];
+          if (aliases.length > 4) throw new Error(t("vocabularyAliasLimit"));
+          vocabulary[existingIndex] = { ...existing, aliases };
+        } else {
+          if (existingIndex !== -1 && existingIndex !== index)
+            throw new Error(t("vocabularyDuplicate"));
+          if (index !== null && index >= 0) vocabulary[index] = entry;
+          else {
+            if (vocabulary.length >= 32) throw new Error(t("vocabularyLimit"));
+            vocabulary.push(entry);
+          }
+        }
+        await api.updateSettings({ vocabulary });
+        setVocabularyEditing(null);
+        setRememberId(null);
+      },
+      t("vocabularySaved")
+    );
+  };
   const toggle = () => {
     setError(null);
     void controller.current?.toggle();
@@ -266,6 +409,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
   }
   function transcriptCard(item: Transcript, latest = false) {
     const rewriteBusy = action === `rewrite-${item.id}`;
+    const guarded = !!item.candidateText && !!item.reviewReasons?.length;
     return (
       <article className={`transcript-card ${latest ? "latest-card" : ""}`} key={item.id}>
         <div className="transcript-meta">
@@ -292,7 +436,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
               <p>{item.rawText || t("originalEmpty")}</p>
             </section>
             <section>
-              <h3>{t("edited")}</h3>
+              <h3>{t(guarded ? "keptText" : "edited")}</h3>
               <p>{item.text || t("originalEmpty")}</p>
             </section>
           </div>
@@ -300,15 +444,55 @@ export default function App({ preview = false }: { preview?: boolean }) {
         <div className="transcript-notes">
           <span>
             {t(
-              item.cleanupStatus === "applied"
-                ? "cleanupApplied"
-                : item.cleanupStatus === "failed"
-                  ? "cleanupFailed"
-                  : "cleanupOff"
+              guarded
+                ? "reviewNeeded"
+                : item.cleanupStatus === "applied"
+                  ? "cleanupApplied"
+                  : item.cleanupStatus === "failed"
+                    ? "cleanupFailed"
+                    : "cleanupOff"
             )}
           </span>
           {item.fallbackReason && <span>{t("fallbackUsed")}</span>}
         </div>
+        {guarded && (
+          <details className="review-suggestion">
+            <summary>
+              <Sparkles size={13} />
+              {t("reviewSuggestion")}
+            </summary>
+            <p className="review-explanation">{t("reviewDetail")}</p>
+            <ul>
+              {item.reviewReasons!.map((reason, index) => (
+                <li key={index}>{reason}</li>
+              ))}
+            </ul>
+            <div className="transcript-columns">
+              <section>
+                <h3>{t("keptText")}</h3>
+                <p>{item.text}</p>
+              </section>
+              <section>
+                <h3>{t("suggestion")}</h3>
+                <p>{item.candidateText}</p>
+              </section>
+            </div>
+            <button
+              className="text-button"
+              disabled={locked}
+              onClick={() =>
+                void perform(
+                  `copy-${item.id}`,
+                  () => api.copyTranscript(item.id, "suggestion"),
+                  t("copied")
+                )
+              }
+            >
+              <Copy size={13} />
+              {t("copySuggestion")}
+            </button>
+          </details>
+        )}
         {latest && (
           <p className={`delivery ${item.delivery === "dispatched" ? "" : "delivery-attention"}`}>
             {t(
@@ -352,7 +536,16 @@ export default function App({ preview = false }: { preview?: boolean }) {
             }
           >
             <Copy size={13} />
-            {t("copyEdited")}
+            {t(guarded ? "copyKept" : "copyEdited")}
+          </button>
+          <button
+            className="text-button"
+            disabled={locked}
+            aria-expanded={rememberId === item.id}
+            onClick={() => setRememberId(rememberId === item.id ? null : item.id)}
+          >
+            <BookOpen size={13} />
+            {t("rememberCorrection")}
           </button>
           {!latest && (
             <>
@@ -384,6 +577,18 @@ export default function App({ preview = false }: { preview?: boolean }) {
             </>
           )}
         </div>
+        {rememberId === item.id && (
+          <div className="remember-form">
+            <h3>{t("rememberCorrection")}</h3>
+            <VocabularyForm
+              key={`remember-${item.id}`}
+              correction
+              disabled={locked}
+              onSave={(entry) => saveVocabulary(entry, null, true)}
+              onCancel={() => setRememberId(null)}
+            />
+          </div>
+        )}
       </article>
     );
   }
@@ -689,6 +894,113 @@ export default function App({ preview = false }: { preview?: boolean }) {
                     state.settings.cleanup,
                     () => void save({ cleanup: !state.settings.cleanup })
                   )}
+                  <div className="setting-row">
+                    <div>
+                      <label htmlFor="format-select" className="setting-label">
+                        {t("format")}
+                      </label>
+                      <p>{t("formatDetail")}</p>
+                    </div>
+                    <select
+                      id="format-select"
+                      value={state.settings.format}
+                      disabled={locked || !state.settings.cleanup}
+                      onChange={(event) =>
+                        void save({ format: event.target.value as Settings["format"] })
+                      }
+                    >
+                      <option value="prose">{t("formatProse")}</option>
+                      <option value="paragraphs">{t("formatParagraphs")}</option>
+                      <option value="list">{t("formatList")}</option>
+                    </select>
+                  </div>
+                </div>
+              </section>
+              <section className="settings-group">
+                <h2>{t("vocabularyGroup")}</h2>
+                <div className="settings-card vocabulary-card">
+                  <div className="vocabulary-heading">
+                    <div>
+                      <span className="setting-label">{t("vocabularyTitle")}</span>
+                      <p>{t("vocabularyDetail")}</p>
+                    </div>
+                    <button
+                      className="small-button"
+                      disabled={locked || state.settings.vocabulary.length >= 32}
+                      onClick={() => setVocabularyEditing(-1)}
+                    >
+                      <Plus size={13} />
+                      {t("addWord")}
+                    </button>
+                  </div>
+                  {vocabularyEditing === -1 && (
+                    <VocabularyForm
+                      key="new-word"
+                      disabled={locked}
+                      onSave={(entry) => saveVocabulary(entry, null)}
+                      onCancel={() => setVocabularyEditing(null)}
+                    />
+                  )}
+                  <div className="vocabulary-list">
+                    {state.settings.vocabulary.map((entry, index) => (
+                      <div className="vocabulary-entry" key={entry.word}>
+                        {vocabularyEditing === index ? (
+                          <VocabularyForm
+                            key={`edit-${entry.word}`}
+                            initial={entry}
+                            disabled={locked}
+                            onSave={(next) => saveVocabulary(next, index)}
+                            onCancel={() => setVocabularyEditing(null)}
+                          />
+                        ) : (
+                          <>
+                            <div className="vocabulary-term">
+                              <span>{entry.word}</span>
+                              {entry.aliases.length > 0 && (
+                                <p>{t("aliasesPreview", { aliases: entry.aliases.join(" · ") })}</p>
+                              )}
+                            </div>
+                            <button
+                              className="icon-button"
+                              aria-label={t("editWord", { word: entry.word })}
+                              disabled={locked}
+                              onClick={() => setVocabularyEditing(index)}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              className="icon-button delete-button"
+                              aria-label={t("removeWord", { word: entry.word })}
+                              disabled={locked}
+                              onClick={() =>
+                                void perform(
+                                  "vocabulary",
+                                  async () => {
+                                    await api.updateSettings({
+                                      vocabulary: state.settings.vocabulary.filter(
+                                        (_, current) => current !== index
+                                      ),
+                                    });
+                                    setVocabularyEditing(null);
+                                  },
+                                  t("vocabularyRemoved")
+                                )
+                              }
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {!state.settings.vocabulary.length && vocabularyEditing === null && (
+                    <p className="vocabulary-empty">{t("vocabularyEmpty")}</p>
+                  )}
+                  <p className="vocabulary-footnote">
+                    {t("vocabularyRules")}{" "}
+                    <span>{t("vocabularyCount", { count: state.settings.vocabulary.length })}</span>
+                  </p>
                 </div>
               </section>
               <section className="settings-group">
