@@ -1,58 +1,46 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+This policy covers [OpenSuperwhisper](https://github.com/ravimaramreddy/open-superwhisper),
+a personal Apple silicon macOS fork of [OpenWhispr](https://github.com/OpenWhispr/openwhispr).
+It applies to the active application in `desktop/`, `local-ui/` and `local-runtime/`.
+Retained upstream files describe a different application; see
+[the local architecture](docs/LOCAL_ARCHITECTURE.md).
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.7.x   | :white_check_mark: |
-| < 1.7   | :x:                |
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
+Do not publish sensitive details in a pull request or other public discussion.
+GitHub private vulnerability reporting is disabled, and this fork has no
+documented private disclosure channel. Request a private contact route from the
+[maintainer](https://github.com/ravimaramreddy) before sharing sensitive details.
+Do not send fork-specific reports to upstream's security address.
 
-**Please do not open public issues for security vulnerabilities.**
+Repository issues are disabled. Routine, non-sensitive fixes can be submitted
+as [pull requests to this fork](https://github.com/ravimaramreddy/open-superwhisper/pulls).
+There is no guaranteed response time or supported-release schedule.
 
-Use [GitHub's private vulnerability reporting](https://github.com/OpenWhispr/openwhispr/security/advisories/new)
-to submit a report. You can also email security@openwhispr.com.
+## Security and privacy boundaries
 
-We will acknowledge your report within **48 hours** and aim to release a fix
-within **7 days** for critical issues.
+- **Processing:** this Mac uses pinned Qwen3-ASR and S1-mini models through MLX.
+  Studio mode sends audio and editing text to the configured Mac Studio through
+  app-owned, loopback-only SSH forwards. Automatic mode tries Studio first.
+  Existing SSH authentication and Studio services are managed outside the app.
+- **Network access:** inference uses your Macs, with no cloud account, API-key
+  vault or upstream account services in the active app. Preparing this Mac
+  downloads public runtime packages and pinned, hash-verified model files.
+- **Local data:** settings, vocabulary, history, runtime files and temporary
+  audio live in `~/Library/Application Support/OpenSuperwhisper`. Saved text is
+  local JSON, without application-level encryption. History retains the latest
+  100 transcripts; disabling history does not delete existing entries.
+- **Audio and delivery:** microphone access records up to two minutes. Temporary
+  audio is removed after processing or cancellation, with abandoned app-owned
+  recordings cleaned on launch; removal failures can leave files behind.
+  Delivery uses the system clipboard and macOS Accessibility permission. Text
+  may remain on the clipboard, including when automatic pasting cannot finish.
+- **Application boundary:** the Electron renderer uses context isolation,
+  sandboxing, disabled Node integration and a narrow preload bridge. The native
+  paste addon runs in the main process. The personal build is unsigned.
 
-## Scope
-
-The following are in scope:
-
-- Remote code execution via crafted audio files or transcription output
-- Privilege escalation through native binaries (key listeners, paste helpers)
-- Credential exposure (API keys, OAuth tokens, database credentials)
-- Cross-site scripting (XSS) in the Electron renderer
-- Insecure IPC between main and renderer processes
-- Supply chain attacks via dependencies or native compilation
-
-Out of scope:
-
-- Issues requiring physical access to an already-unlocked machine
-- Denial of service against the local application
-- Social engineering
-
-## Security Model
-
-- **Local-first audio processing** — Audio is transcribed on-device using
-  whisper.cpp or nvidia parakeet. Recordings are not sent to external servers unless explicitly
-  configured by the user.
-- **Credential storage** — API keys provided by users (BYOK) and enterprise
-  cloud credentials (AWS, Azure, Vertex) are encrypted at rest using
-  Electron's `safeStorage` API, which delegates to the OS keychain (Keychain
-  on macOS, DPAPI on Windows, libsecret on Linux). Encrypted blobs are stored
-  under `userData/secure-keys/`. Non-secret preferences (regions, endpoints,
-  hotkeys, flags) continue to live in `.env`. On Linux systems without a
-  keyring, secrets fall back to plaintext to match Electron's default
-  behavior.
-- **Native binaries** — Platform-specific helpers (key listeners, paste
-  utilities) are compiled from source during the build process.
-- **Context isolation** — The Electron renderer runs with context isolation
-  enabled and a restricted preload bridge.
-
-## Disclosure Policy
-
-We follow coordinated disclosure. Once a fix is released, we will credit
-reporters in the changelog (unless they prefer to remain anonymous).
+Relevant reports include unsafe IPC, renderer code execution, unintended file
+access or data disclosure, SSH/runtime setup flaws, and native paste or dependency
+vulnerabilities. Transcription and cleanup can still change meaning; the review
+checks are best-effort safeguards, not an accuracy guarantee.

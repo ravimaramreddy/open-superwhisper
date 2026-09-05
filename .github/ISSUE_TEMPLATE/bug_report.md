@@ -1,40 +1,26 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Report a problem with this macOS dictation fork
 title: ""
 labels: ""
 assignees: ""
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**What happened?**
+Describe the result and what you expected instead.
 
-**To Reproduce**
-Steps to reproduce the behavior:
+**Steps to reproduce**
+Include a short, non-sensitive example if the issue concerns recognition or cleanup.
 
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+**Setup**
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+- Mac model / Apple silicon chip:
+- macOS version:
+- App version or commit:
+- Processing mode: Automatic / Studio / This Mac
+- Clean English: on / off
+- Target app, if this concerns automatic paste:
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
-
-**Desktop (please complete the following information):**
-
-- OS: [e.g. iOS]
-- Browser [e.g. chrome, safari]
-- Version [e.g. 22]
-
-**Smartphone (please complete the following information):**
-
-- Device: [e.g. iPhone6]
-- OS: [e.g. iOS8.1]
-- Browser [e.g. stock browser, safari]
-- Version [e.g. 22]
-
-**Additional context**
-Add any other context about the problem here.
+**Relevant message or screenshot**
+Remove private text before attaching it. Do not attach recordings, full history,
+machine configuration, credentials or sensitive security details. See [SECURITY.md](https://github.com/ravimaramreddy/open-superwhisper/blob/main/SECURITY.md).
