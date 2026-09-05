@@ -143,3 +143,16 @@ negation loss, both route integrations, immutable settings snapshots, additive
 history metadata, explicit suggestion copying and no second automatic paste.
 Checks remain heuristic: ambiguous spoken years may be flagged, while changed
 unknown names, units or reordered facts can escape. Original ASR remains available.
+
+Final follow-up validation: 85 Node tests and 10 Python tests passed, alongside
+ESLint, TypeScript, Prettier, Ruff, renderer/native builds and ARM64 packaging.
+Independent judge and peer found a path-boundary issue; complete relative paths,
+including trailing-slash directories, now preserve casing and trigger review if
+the model changes them. Both reviewers checked the fixes without further findings.
+
+Browser preview checks exercised add/edit/limit validation, remembering an alias
+without changing history, layout selection and explicit suggestion review. The
+installed app's Settings and latest-result controls were visually verified; its
+archive, worker, prompt and native addon matched the build. Existing preferences
+were byte-for-byte unchanged. No new physical microphone/paste trial was conducted
+for this feature; the native paste path is unchanged from the verified earlier fix.
