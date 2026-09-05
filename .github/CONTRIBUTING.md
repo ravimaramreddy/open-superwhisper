@@ -1,60 +1,62 @@
-# Contributing to OpenWhispr
+# Contributing to OpenSuperwhisper
 
-Thanks for your interest in contributing. OpenWhispr is an open-source,
-privacy-first voice-to-text app, and improvements from the community —
-bug reports, fixes, docs, features — are very welcome.
+This is a personal Apple silicon macOS dictation fork of
+[OpenWhispr](https://github.com/OpenWhispr/openwhispr). Contributions target
+[`ravimaramreddy/open-superwhisper`](https://github.com/ravimaramreddy/open-superwhisper),
+not the upstream project. Start with the [README](../README.md) and
+[local architecture](../docs/LOCAL_ARCHITECTURE.md).
 
-The canonical contributing guide lives at
-**[docs.openwhispr.com/contributing](https://docs.openwhispr.com/contributing)**.
-This file is a short pointer with the repo-local details you may need
-along the way.
+## Scope and workflow
 
-## Filing issues
+The active application lives in `desktop/`, `local-ui/` and `local-runtime/`.
+It uses fixed local models and existing Studio services over app-owned SSH
+forwards. Upstream `src/` and legacy tooling remain as reference and are excluded
+from the active application and package. Keep changes within that architecture.
 
-- Bugs and feature requests:
-  [github.com/OpenWhispr/openwhispr/issues](https://github.com/OpenWhispr/openwhispr/issues)
-- Please use the existing issue templates (`bug_report`, `feature_request`)
-  so we have the info needed to reproduce.
-- For transcription or audio problems, attaching debug logs is a huge
-  help — see [`DEBUG.md`](../DEBUG.md) for how to enable debug logging
-  and where the log files live, and [`TROUBLESHOOTING.md`](../TROUBLESHOOTING.md)
-  for common fixes to try first.
+1. Fork this repository and create a focused branch from `main`.
+2. Make the change in the active code or its documentation. Preserve upstream
+   attribution, the [MIT license](../LICENSE) and
+   [third-party/model notices](../THIRD_PARTY_NOTICES.md).
+3. Run the relevant checks below and describe the behavior changed, reproduction
+   steps and validation in your pull request.
+4. Open the pull request against
+   [`ravimaramreddy/open-superwhisper:main`](https://github.com/ravimaramreddy/open-superwhisper/pulls).
 
-## Reporting security issues
+Repository issues are disabled. Submit routine, non-sensitive fixes through pull
+requests. For sensitive vulnerabilities, follow [SECURITY.md](../SECURITY.md)
+before sharing details publicly. Remove private transcripts, audio, host details
+and credentials from examples or logs; never commit `machine.json` or app data.
 
-**Please do not open public issues for security vulnerabilities.**
-Follow the process in [`SECURITY.md`](../SECURITY.md): use
-[GitHub's private vulnerability reporting](https://github.com/OpenWhispr/openwhispr/security/advisories/new)
-or email `security@openwhispr.com`.
+## Local setup
 
-## Contributing code
+Use an Apple silicon Mac with Node 24+, Xcode command-line tools and
+[uv](https://docs.astral.sh/uv/getting-started/installation/) for local inference.
 
-See the [contributing guide](https://docs.openwhispr.com/contributing)
-for the full workflow, coding conventions, and review expectations.
-The short version:
+```sh
+npm ci --ignore-scripts
+node node_modules/electron/install.js
+npm run dev
+```
 
-1. Fork the repo and create a feature branch off `main`.
-2. Make your change, keeping the diff focused.
-3. Run `npm run lint` and `npm run format` before opening a PR.
-4. Open a pull request against `OpenWhispr/openwhispr` `main` and fill
-   in the description so reviewers can see the "why".
+Prepare the local models and configure Studio as described in the
+[README](../README.md). Studio integration requires working noninteractive SSH
+and the expected services; running the app does not install them.
 
-### Local setup
+## Validation and packaging
 
-| Requirement | Notes                                                                             |
-| ----------- | --------------------------------------------------------------------------------- |
-| Node.js     | Version pinned in [`.nvmrc`](../.nvmrc) (currently `24`). Use `nvm use` to match. |
-| Install     | `npm install`                                                                     |
-| Run dev     | `npm run dev`                                                                     |
-| Lint        | `npm run lint`                                                                    |
-| Format      | `npm run format`                                                                  |
-| Build       | `npm run build` (or `build:mac` / `build:win` / `build:linux`)                    |
+```sh
+npm run quality-check
+npm run lint:python
+npm test
+npm run test:python
+npm run pack       # release/mac-arm64/OpenSuperwhisper.app
+npm run build:mac  # also produce a DMG
+```
 
-Platform-specific setup, local Whisper notes, and packaging details are
-in [`README.md`](../README.md) and
-[`LOCAL_WHISPER_SETUP.md`](../LOCAL_WHISPER_SETUP.md).
+Run checks relevant to the changed files; verify packaging when changing the
+build or shipped files. Automated tests do not establish real model inference,
+microphone permission or paste behavior. Check those separately on an installed
+app when affected, using a controlled text field and non-sensitive sample audio.
 
-## Thanks
-
-Thanks for taking the time to contribute — every issue, fix, and
-improvement helps make OpenWhispr better.
+For UI-only work, `npm run dev:ui` starts the renderer. Append `?preview=1` for
+labeled sample data; preview does not record and is excluded from production.
