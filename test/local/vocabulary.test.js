@@ -65,6 +65,8 @@ test("aliases preserve quotes, code, URLs, flags and paths", () => {
 
 test("complete relative paths are protected from canonical casing and alias replacement", () => {
   for (const text of [
+    "qwen/",
+    "tailscale/",
     "qwen/models",
     "tailscale/config.json",
     "声/qwen",
@@ -84,6 +86,12 @@ test("complete relative paths are protected from canonical casing and alias repl
   );
   assert.equal(changed.text, "open qwen/models folder");
   assert.ok(changed.candidateText);
+  assert.deepEqual(reviewEdit("open qwen/ folder", "Open qwen/ folder.", DEFAULT_VOCABULARY), {
+    text: "Open qwen/ folder.",
+  });
+  assert.ok(
+    reviewEdit("open qwen/ folder", "Open Qwen/ folder.", DEFAULT_VOCABULARY).candidateText
+  );
 });
 
 test("meaning review permits grammar, numeric rendering and explicit numeric self-correction", () => {
