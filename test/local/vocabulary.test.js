@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeVocabulary, applyVocabulary } = require("../../desktop/vocabulary");
+const {
+  normalizeVocabulary,
+  applyVocabulary,
+  DEFAULT_VOCABULARY,
+} = require("../../desktop/vocabulary");
 const { reviewEdit } = require("../../desktop/edit-review");
 const vocabulary = normalizeVocabulary([
   { word: "OpenSuperwhisper", aliases: ["open super whisper"] },
@@ -59,6 +63,29 @@ test("aliases preserve quotes, code, URLs, flags and paths", () => {
     assert.equal(applyVocabulary(quoted, vocabulary), quoted);
 });
 
+test("complete relative paths are protected from canonical casing and alias replacement", () => {
+  for (const text of [
+    "qwen/models",
+    "tailscale/config.json",
+    "声/qwen",
+    "./qwen/models",
+    "~/qwen/models",
+  ])
+    assert.equal(applyVocabulary(text, DEFAULT_VOCABULARY), text);
+  assert.equal(applyVocabulary("tail scale/config.json", vocabulary), "tail scale/config.json");
+  assert.deepEqual(
+    reviewEdit("open qwen/models folder", "Open qwen/models folder.", DEFAULT_VOCABULARY),
+    { text: "Open qwen/models folder." }
+  );
+  const changed = reviewEdit(
+    "open qwen/models folder",
+    "Open Qwen/models folder.",
+    DEFAULT_VOCABULARY
+  );
+  assert.equal(changed.text, "open qwen/models folder");
+  assert.ok(changed.candidateText);
+});
+
 test("meaning review permits grammar, numeric rendering and explicit numeric self-correction", () => {
   for (const [raw, output] of [
     ["i need twenty five copies", "I need 25 copies."],
@@ -67,6 +94,8 @@ test("meaning review permits grammar, numeric rendering and explicit numeric sel
     ["we need one point five liters", "We need 1.5 liters."],
     ["the cost is 5 million", "The cost is 5000000."],
     ["buy tea coffee and milk", "1. Tea\n2. Coffee\n3. Milk"],
+    ["visit https://example.com", "Visit https://example.com."],
+    ["use /tmp/report.json", "Use /tmp/report.json."],
     ["i can't deploy it", "I cannot deploy it."],
     ["use open super whisper with Superwhisper", "Use OpenSuperwhisper with Superwhisper."],
   ])
@@ -82,6 +111,7 @@ test("meaning review keeps original and reviewable candidate for changed facts/l
     ["there are no errors", "There are errors."],
     ["use Superwhisper", "Use OpenSuperwhisper."],
     ["run `git status`", "Run `git push`."],
+    ["visit https://example.com/a", "Visit https://example.com/b."],
     ['keep "exact wording"', 'Keep "different wording".'],
     ["sorry the team has 10 people and 20 tasks", "The team has 20 tasks."],
   ]) {

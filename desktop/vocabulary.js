@@ -61,12 +61,19 @@ function phrasePattern(terms) {
 
 // Literal text and technical tokens are never targets of dictionary replacement.
 const LITERALS =
-  /```[\s\S]*?(?:```|$)|`[^`\n]*(?:`|$)|"[^"\n]*(?:"|$)|“[^”\n]*(?:”|$)|‘[^\n]*?(?:’(?![\p{L}\p{N}])|$)|(?<![\p{L}\p{N}])'[^\n]*?(?:'(?![\p{L}\p{N}])|$)|(?:https?:\/\/|www\.|~\/|\.{1,2}\/|\/)[^\s<>"'`]+|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|(?<!\w)--?[a-z][\w-]*(?:=[^\s]+)?|\b[\w-]+(?:\.[\w-]+)+\b/giu;
+  /```[\s\S]*?(?:```|$)|`[^`\n]*(?:`|$)|"[^"\n]*(?:"|$)|“[^”\n]*(?:”|$)|‘[^\n]*?(?:’(?![\p{L}\p{N}])|$)|(?<![\p{L}\p{N}])'[^\n]*?(?:'(?![\p{L}\p{N}])|$)|(?:https?:\/\/|www\.|~\/|\.{1,2}\/|\/)[^\s<>"'`]+|(?<![\p{L}\p{N}_./~-])[\p{L}\p{N}_.~@+-]+(?:\/[^\s<>"'`]+)+|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|(?<!\w)--?[a-z][\w-]*(?:=[^\s]+)?|\b[\w-]+(?:\.[\w-]+)+\b/giu;
 
 function literalSpans(text) {
   return [...text.matchAll(LITERALS)]
     .filter((match) => !/^\d+(?:\.\d+)+$/.test(match[0]))
-    .map((match) => ({ start: match.index, end: match.index + match[0].length, text: match[0] }));
+    .map((match) => {
+      // Sentence punctuation is outside an unquoted URL/path. Quoted and code
+      // spans stay exact, including any punctuation inside their delimiters.
+      const literal = /^(?:https?:\/\/|www\.|~\/|\.{1,2}\/|\/|[^\s/]+\/)/i.test(match[0])
+        ? match[0].replace(/[.,;:!?]+$/, "")
+        : match[0];
+      return { start: match.index, end: match.index + literal.length, text: literal };
+    });
 }
 
 function applyVocabulary(text, vocabulary) {
