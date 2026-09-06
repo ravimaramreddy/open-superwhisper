@@ -126,8 +126,8 @@ login is currently active. Restart the app after changing this private file.
 Select **Gemini**, then **Check connections**. The app checks the project's billing
 attachment before obtaining an access token. This is a connection/authentication
 check, not a paid transcription or a credit-balance check. Access tokens and
-successful verification are cached in the main process for at most five minutes,
-then discarded or refreshed. No credentials are stored in History or renderer
+successful verification stay in main-process memory and are reused for at most
+five minutes before rechecking. No credentials are stored in History or renderer
 settings. No API-key input or arbitrary endpoint is supported.
 
 Keep This Mac's models prepared so fallback works when both the cloud and Studio
