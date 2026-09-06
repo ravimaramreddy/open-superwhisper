@@ -16,7 +16,10 @@ S1_SYSTEM = (
     "clean the transcript to match those settings and output only the cleaned text."
 )
 S1_CONTROLS = "[Styling: semi-formal] [Structure: prose] [Context: general]\n"
-MAX_TOKENS = 512
+MAX_TOKENS = 4096
+MAX_RECORDING_SECONDS = json.loads(
+    Path(__file__).with_name("recording-limits.json").read_text(encoding="utf-8")
+)["maxRecordingSeconds"]
 
 
 def vocabulary_words(entries):
@@ -74,8 +77,10 @@ def validate_wav(filename, audio_root):
         ) != (1, 2, 16000, "NONE"):
             raise ValueError("Audio must be 16 kHz mono PCM16 WAV")
         duration = audio.getnframes() / 16000
-        if not 0 < duration <= 120:
-            raise ValueError("Recording must be between 0 and 120 seconds")
+        if not 0 < duration <= MAX_RECORDING_SECONDS:
+            raise ValueError(
+                f"Recording must be between 0 and {MAX_RECORDING_SECONDS} seconds"
+            )
     return path
 
 

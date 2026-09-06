@@ -1,4 +1,5 @@
 import type { LocalWhisprAPI, RecordingSession, Transcript } from "../desktop/contracts";
+import recordingLimits from "../local-runtime/recording-limits.json";
 
 export type CapturePhase = "idle" | "opening" | "recording" | "stopping" | "processing";
 export interface CaptureView {
@@ -21,7 +22,7 @@ export interface RecorderOptions {
   onEnded(): void;
   onLimit(): void;
 }
-export const MAX_RECORDING_SECONDS = 120;
+export const MAX_RECORDING_SECONDS = recordingLimits.maxRecordingSeconds;
 
 /** One owner per renderer. Every asynchronous continuation belongs to a generation. */
 export class CaptureController {

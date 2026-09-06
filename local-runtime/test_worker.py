@@ -135,6 +135,97 @@ class WorkerTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 worker.validate_wav(filename, directory)
 
+    def test_wave_duration_accepts_five_minutes_and_rejects_one_extra_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "recording.wav"
+            for frames in [300 * 16000, 300 * 16000 + 1]:
+                with self.subTest(frames=frames):
+                    with wave.open(str(filename), "wb") as audio:
+                        audio.setnchannels(1)
+                        audio.setsampwidth(2)
+                        audio.setframerate(16000)
+                        audio.writeframes(b"\0\0" * frames)
+                    if frames == 300 * 16000:
+                        self.assertEqual(
+                            worker.validate_wav(filename, directory), filename.resolve()
+                        )
+                    else:
+                        with self.assertRaises(ValueError):
+                            worker.validate_wav(filename, directory)
+
+    def test_recognition_accepts_complete_long_output_but_rejects_exhaustion(self):
+        engine = worker.Engine("qwen", "s1", ".", lambda _message: None)
+        engine.load_asr = lambda: None
+        engine.mx = types.SimpleNamespace(synchronize=lambda: None)
+        tokens = ["word "] * 767 + ["final detail."]
+
+        def generate(_audio, **kwargs):
+            generated = tokens[: kwargs["max_tokens"]]
+            return types.SimpleNamespace(
+                text="".join(generated), generation_tokens=len(generated)
+            )
+
+        engine.asr = types.SimpleNamespace(generate=generate)
+        with patch.object(worker, "validate_wav", return_value=Path("audio.wav")):
+            result = engine.process({"audioPath": "audio.wav", "editingMode": "exact"})
+            self.assertEqual(result["rawText"], "".join(tokens))
+            self.assertEqual(result["text"], "".join(tokens))
+            for count in [4096, 4097]:
+                with self.subTest(generation_tokens=count):
+                    engine.asr.generate = lambda *_args, count=count, **_kwargs: (
+                        types.SimpleNamespace(
+                            text="Incomplete", generation_tokens=count
+                        )
+                    )
+                    with self.assertRaisesRegex(
+                        RuntimeError, "recognition.*length limit"
+                    ):
+                        engine.process(
+                            {"audioPath": "audio.wav", "editingMode": "exact"}
+                        )
+
+    def test_long_correction_completes_or_preserves_raw_when_output_is_exhausted(self):
+        engine = worker.Engine("qwen", "s1", ".", lambda _message: None)
+        engine.load_asr = lambda: None
+        engine.mx = types.SimpleNamespace(synchronize=lambda: None)
+        original = "word " * 767 + "final detail."
+        engine.asr = types.SimpleNamespace(
+            generate=lambda *_args, **_kwargs: types.SimpleNamespace(
+                text=original, generation_tokens=768
+            )
+        )
+        engine.editor = object()
+        engine.tokenizer = types.SimpleNamespace(
+            apply_chat_template=lambda *_args, **_kwargs: "prompt"
+        )
+        pieces = ["Edited "] * 767 + ["final detail."]
+        modules = {
+            "mlx_lm": types.SimpleNamespace(
+                load=lambda _path: self.fail("editor already loaded"),
+                stream_generate=lambda *_args, **kwargs: (
+                    types.SimpleNamespace(text=text)
+                    for text in pieces[: kwargs["max_tokens"]]
+                ),
+            ),
+            "mlx_lm.sample_utils": types.SimpleNamespace(
+                make_sampler=lambda **_kwargs: None
+            ),
+        }
+        with (
+            patch.dict("sys.modules", modules),
+            patch.object(worker, "validate_wav", return_value=Path("audio.wav")),
+        ):
+            result = engine.process({"audioPath": "audio.wav", "editingMode": "clean"})
+            self.assertEqual(result["text"], "".join(pieces))
+            self.assertEqual(result["rawText"], original)
+            self.assertEqual(result["cleanupStatus"], "applied")
+            pieces = ["Partial "] * 4096
+            result = engine.process({"audioPath": "audio.wav", "editingMode": "clean"})
+            self.assertEqual(result["rawText"], original)
+            self.assertEqual(result["text"], original)
+            self.assertEqual(result["cleanupStatus"], "failed")
+            self.assertIn("Correction reached its length limit", result["warning"])
+
     def test_protocol_processes_coalesced_lines_on_one_thread(self):
         reader, writer = os.pipe()
         observed, responses = [], []

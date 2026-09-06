@@ -369,7 +369,7 @@ class GeminiClient {
           },
         ],
         generationConfig: {
-          maxOutputTokens: 4096,
+          maxOutputTokens: 8192,
           responseMimeType: "application/json",
           thinkingConfig: { thinkingLevel: "LOW" },
           responseSchema: {

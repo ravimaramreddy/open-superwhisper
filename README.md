@@ -3,7 +3,7 @@
 Private dictation for macOS, with English cleanup, custom vocabulary and automatic
 paste. Built on [OpenWhispr](https://github.com/OpenWhispr/openwhispr).
 Press **⌃⌥Space**, speak, then press it again to place the text in your focused app.
-Press **Escape** to cancel. Recordings stop after two minutes.
+Press **Escape** to cancel. Recordings stop after five minutes.
 
 | Mode      | Speech recognition                                         | Optional text cleanup                  |
 | --------- | ---------------------------------------------------------- | -------------------------------------- |

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
+const { maxRecordingSeconds } = require("../local-runtime/recording-limits.json");
 
 const LIMIT_BYTES = 1024 * 1024 * 1024;
 const LIMIT_CLIPS = 2000;
@@ -98,10 +99,12 @@ function validateWav(buffer) {
     !format ||
     audioBytes === 0 ||
     audioBytes % 2 ||
-    audioBytes > 16000 * 2 * 120 ||
+    audioBytes > 16000 * 2 * maxRecordingSeconds ||
     offset !== buffer.length
   )
-    throw new Error("Recording must be 16 kHz mono PCM16 WAV, up to two minutes");
+    throw new Error(
+      `Recording must be 16 kHz mono PCM16 WAV, up to ${maxRecordingSeconds / 60} minutes`
+    );
 }
 
 class AudioArchive {

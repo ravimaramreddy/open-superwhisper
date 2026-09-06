@@ -32,7 +32,7 @@ The microphone owner is created by one React effect, and disposes subscriptions,
 stream and pending recording on cleanup. The owner calls main before acquiring
 audio so main can snapshot the insertion target. Stop drains the AudioWorklet;
 cancel invalidates every asynchronous continuation. Browser resampling produces
-16 kHz mono PCM16 WAV. Capture is limited to two minutes. Backend silence and
+16 kHz mono PCM16 WAV. Capture is limited to five minutes. Backend silence and
 transport checks remain required.
 
 `?preview=1` enables explicitly labelled sample data only in Vite development.

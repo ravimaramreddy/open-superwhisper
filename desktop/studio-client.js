@@ -5,6 +5,8 @@ const net = require("node:net");
 const { abortError, throwIfAborted, awaitAbortable } = require("./air-worker-client");
 const { normalizeVocabulary } = require("./vocabulary");
 
+const MAX_OUTPUT_TOKENS = 4096;
+
 function unavailable(message, cause) {
   return Object.assign(new Error(message, { cause }), { code: "STUDIO_UNAVAILABLE" });
 }
@@ -287,7 +289,7 @@ class StudioClient {
           "--identifier",
           this.instance,
           "--context-length",
-          "8192",
+          "16384",
           "--gpu",
           "max",
           "--ttl",
@@ -348,7 +350,7 @@ class StudioClient {
           // instructions as dictation; only the progress message differs.
           system_prompt: this.prompts.cleanup,
           temperature: 0,
-          max_output_tokens: 512,
+          max_output_tokens: MAX_OUTPUT_TOKENS,
           reasoning: "off",
           store: false,
         }),
@@ -362,8 +364,8 @@ class StudioClient {
       .trim();
     if (
       !output ||
-      result.stats?.total_output_tokens >= 512 ||
-      result.stats?.output_tokens >= 512 ||
+      result.stats?.total_output_tokens >= MAX_OUTPUT_TOKENS ||
+      result.stats?.output_tokens >= MAX_OUTPUT_TOKENS ||
       result.stats?.stop_reason === "max_tokens" ||
       result.stop_reason === "max_tokens"
     ) {
