@@ -158,7 +158,7 @@ for this feature; the native paste path is unchanged from the verified earlier f
 
 ## Editing modes, app preferences and recovery
 
-The current regression suite has 109 Node tests and 14 Python tests. Added cases
+The current regression suite has 110 Node tests and 14 Python tests. Added cases
 cover settings compatibility, target-app snapshots, retries from immutable ASR,
 one-level undo across restart, explicit candidate acceptance, accurate current
 cleanup status, failed saves, cancellation and no repeated delivery. Diff tests
@@ -185,3 +185,10 @@ Browser preview checks exercised highlighted suggestions, acceptance, Undo,
 Retry, separate processing details and an app-specific Exact preference. The
 preview makes these changes only to synthetic in-memory records. Native app
 launch/packaging checks remain separate from these preview interactions.
+
+Independent review found two integration issues: large Unicode settings could
+exceed the old reader limit, and initial-cleanup Undo could lose its History-only
+notice. The fix shares a 128 KiB settings read/write limit with a pre-write check,
+adds a maximum-size Unicode round-trip regression, and tracks History actions
+separately from editor provenance. Preview Undo now visibly retains the copy-to-use
+notice while showing original wording.

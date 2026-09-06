@@ -85,6 +85,7 @@ function validRecord(record) {
     record &&
     typeof record === "object" &&
     validVersion(record) &&
+    (record.historyEdited === undefined || typeof record.historyEdited === "boolean") &&
     (record.targetApp === undefined || validApp(record.targetApp)) &&
     (record.previousVersion === undefined ||
       (validVersion(record.previousVersion) &&
@@ -201,7 +202,7 @@ class History {
     if (!current) throw new Error("Transcript not found");
     // Rewrites and delivery changes cannot replace original ASR output or identity.
     const allowed = {};
-    for (const key of [...VERSION_KEYS, "delivery", "previousVersion"])
+    for (const key of [...VERSION_KEYS, "delivery", "previousVersion", "historyEdited"])
       if (Object.hasOwn(changes, key)) allowed[key] = structuredClone(changes[key]);
     const updated = { ...current, ...allowed };
     if (!validRecord(updated)) throw new Error("Invalid transcript update");

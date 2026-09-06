@@ -40,7 +40,8 @@ App rules (at most 32) match the captured bundle identifier; only the app name a
 identifier are retained, never its screen or document contents. Rules override
 the global editing mode/style/format. Legacy cleanup=false maps to Exact and
 cleanup=true to Polished; explicit editingMode takes precedence. The legacy
-boolean stays synchronized for compatibility.
+boolean stays synchronized for compatibility. The reader and writer share a
+128 KiB settings limit, checked before applying operating-system preferences.
 Older settings receive defaults without replacing saved microphone, shortcut,
 login, profile or history preferences. Vocabulary uses the existing serialized,
 atomic settings update path and remains private app data.
@@ -66,7 +67,8 @@ rule, rather than repeatedly rewriting prior output. Exact bypasses inference.
 Text-only retries use Studio/Air routing, with Auto falling back only on a Studio
 connection-unavailable result. Air has a dedicated text-only worker method; it
 does not rerun ASR. Retry/acceptance provenance and timings are separate from the
-original speech run. A flagged retry retains the current text. No History action
+original speech run. A separate historyEdited marker survives Undo, including
+restoration of raw text with no editor provenance. A flagged retry retains the current text. No History action
 claims another automatic delivery.
 
 History is saved before delivery and claims each automatic delivery once. The

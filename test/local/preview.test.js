@@ -55,7 +55,14 @@ test("preview state emissions, app rule removal and initial undo are functional"
   const unsubscribe = api.onState(() => emissions++);
   const { history } = await api.getState();
   const sample = history.find((item) => item.id === "preview-sample");
-  assert.equal((await api.undoTranscript(sample.id)).text, sample.rawText);
+  const undone = await api.undoTranscript(sample.id);
+  assert.equal(undone.text, sample.rawText);
+  assert.equal(undone.historyEdited, true);
+  assert.equal(
+    undone.edit,
+    undefined,
+    "undo must not invent an editor run to mark a History action"
+  );
   await api.updateSettings({
     appRules: [{ ...sample.targetApp, editingMode: "exact", style: "neutral", format: "prose" }],
   });

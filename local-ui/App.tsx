@@ -525,7 +525,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
             </div>
           </details>
         )}
-        {latest && !editedLater && (
+        {latest && !editedLater && !item.historyEdited && (
           <p className={`delivery ${item.delivery === "dispatched" ? "" : "delivery-attention"}`}>
             {t(
               item.delivery === "dispatched"
@@ -540,7 +540,9 @@ export default function App({ preview = false }: { preview?: boolean }) {
             )}
           </p>
         )}
-        {editedLater && <p className="history-action-note">{t("historyEditOnly")}</p>}
+        {(editedLater || item.historyEdited) && (
+          <p className="history-action-note">{t("historyEditOnly")}</p>
+        )}
         <details className="transcript-performance">
           <summary>{t("processingDetails")}</summary>
           <p>{t("originalRoute", { machine: t(item.actualProfile) })}</p>

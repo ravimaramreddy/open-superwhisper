@@ -62,6 +62,7 @@ export interface Transcript extends TextVersion {
   delivery: "pending" | "dispatched" | "clipboard-only" | "uncertain" | "cancelled";
   targetApp?: { bundleId: string; name: string };
   previousVersion?: TextVersion;
+  historyEdited?: boolean;
 }
 export interface AppState {
   settings: Settings;

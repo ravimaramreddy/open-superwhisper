@@ -183,6 +183,7 @@ export function createPreviewAPI(): LocalWhisprAPI {
       return update({
         ...item,
         previousVersion: version(item),
+        historyEdited: true,
         text,
         cleanupStatus: options.editingMode === "exact" ? "off" : "applied",
         candidateText: undefined,
@@ -201,7 +202,12 @@ export function createPreviewAPI(): LocalWhisprAPI {
     undoTranscript: async (id) => {
       const item = find(id);
       if (!item.previousVersion) throw new Error("No previous edit to undo.");
-      return update({ ...item, ...version(item.previousVersion), previousVersion: undefined });
+      return update({
+        ...item,
+        ...version(item.previousVersion),
+        previousVersion: undefined,
+        historyEdited: true,
+      });
     },
     acceptSuggestion: async (id) => {
       const item = find(id);
@@ -209,6 +215,7 @@ export function createPreviewAPI(): LocalWhisprAPI {
       return update({
         ...item,
         previousVersion: version(item),
+        historyEdited: true,
         text: item.candidateText,
         cleanupStatus: "applied",
         candidateText: undefined,

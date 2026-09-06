@@ -455,8 +455,41 @@ test("initial cleanup can be undone without altering the delivered text or origi
   assert.equal(undone.cleanupStatus, "off");
   assert.equal(undone.editingMode, "exact");
   assert.equal(undone.previousVersion, undefined);
+  assert.equal(undone.historyEdited, true);
+  assert.equal(undone.edit, undefined);
   assert.equal(calls.delivery.length, 1);
   assert.equal(calls.delivery[0].text, "Keep the original.");
+});
+
+test("maximum Unicode vocabulary and app rules survive restart without changing privacy", async (t) => {
+  const { controller, directory, history } = harness(t);
+  const vocabulary = Array.from({ length: 32 }, (_, i) => ({
+    word: (`w${i}` + "界".repeat(80)).slice(0, 80),
+    aliases: Array.from({ length: 4 }, (_, j) => (`a${i}-${j}` + "語".repeat(80)).slice(0, 80)),
+  }));
+  const appRules = Array.from({ length: 32 }, (_, i) => ({
+    bundleId: (`com.example.${i}.` + "x".repeat(256)).slice(0, 256),
+    name: "界".repeat(160),
+    editingMode: "exact",
+    style: "neutral",
+    format: "prose",
+  }));
+  await controller.updateSettings({
+    vocabulary,
+    appRules,
+    profile: "air",
+    editingMode: "exact",
+    historyEnabled: false,
+    launchAtLogin: true,
+  });
+  assert.ok(fs.statSync(path.join(directory, "settings.json")).size > 64 * 1024);
+  const restarted = new Controller({
+    userData: directory,
+    history,
+    permissions: { get: () => ({ microphone: "granted", accessibility: true }) },
+  });
+  assert.deepEqual(restarted.getState().settings, controller.getState().settings);
+  assert.equal(restarted.getState().settings.historyEnabled, false);
 });
 
 test("rewrite changes edited text only and never pastes again", async (t) => {

@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   launchAtLogin: false,
 });
 const MAX_AUDIO_BYTES = 60 * 1024 * 1024;
+const MAX_SETTINGS_BYTES = 128 * 1024;
 
 function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch))
@@ -71,7 +72,7 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
 
 function readSettings(file) {
   try {
-    if (fs.statSync(file).size > 64 * 1024) return { ...DEFAULT_SETTINGS };
+    if (fs.statSync(file).size > MAX_SETTINGS_BYTES) return { ...DEFAULT_SETTINGS };
     return normalizeSettings(JSON.parse(fs.readFileSync(file, "utf8")));
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -225,6 +226,9 @@ class Controller {
       .then(async () => {
         const previous = this.state.settings;
         const next = normalizeSettings(patch, previous);
+        // Use the same serialized limit as the reader, before changing OS settings.
+        if (Buffer.byteLength(JSON.stringify(next, null, 2)) > MAX_SETTINGS_BYTES)
+          throw new Error("Settings are too large. Shorten some vocabulary or app names.");
         await this.applySettings(next, previous);
         try {
           atomicWrite(this.settingsFile, next);
@@ -566,6 +570,7 @@ class Controller {
           ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
         },
         previousVersion: textVersion(record),
+        historyEdited: true,
       });
       if (this.state.latest?.id === id) this.state.latest = updated;
       return updated;
@@ -590,6 +595,7 @@ class Controller {
     const updated = this.history.update(id, {
       ...textVersion(record.previousVersion),
       previousVersion: undefined,
+      historyEdited: true,
     });
     if (this.state.latest?.id === id) this.state.latest = updated;
     this.emit();
@@ -607,6 +613,7 @@ class Controller {
       reviewReasons: undefined,
       warning: undefined,
       previousVersion: textVersion(record),
+      historyEdited: true,
       edit: {
         source: "accepted",
         profile: record.edit?.profile || record.actualProfile,
