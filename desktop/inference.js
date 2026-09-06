@@ -9,6 +9,7 @@ const { StudioClient } = require("./studio-client");
 const { GeminiClient } = require("./gemini-client");
 const { normalizeVocabulary, applyVocabulary } = require("./vocabulary");
 const { reviewEdit } = require("./edit-review");
+const { maxRecordingSeconds } = require("../local-runtime/recording-limits.json");
 
 function resourceRoot(resourcesPath) {
   const candidates = [
@@ -90,8 +91,15 @@ async function validateAudio(audioPath, userData) {
     if (kind === "data") audioBytes += size;
     offset += 8 + size + (size % 2);
   }
-  if (!validFormat || audioBytes === 0 || audioBytes % 2 || audioBytes > 16000 * 2 * 120) {
-    throw new Error("Recording must be 16 kHz mono PCM16 WAV, up to 120 seconds");
+  if (
+    !validFormat ||
+    audioBytes === 0 ||
+    audioBytes % 2 ||
+    audioBytes > 16000 * 2 * maxRecordingSeconds
+  ) {
+    throw new Error(
+      `Recording must be 16 kHz mono PCM16 WAV, up to ${maxRecordingSeconds} seconds`
+    );
   }
   return resolved;
 }

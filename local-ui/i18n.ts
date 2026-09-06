@@ -47,7 +47,7 @@ const en = {
   stop: "Finish dictation",
   cancel: "Cancel",
   shortcutHint: "or press",
-  durationLimit: "Up to 2 minutes per recording",
+  durationLimit: "Up to 5 minutes per recording",
   cleanup: "Clean English",
   editingMode: "Cleanup",
   defaultEditing: "Default cleanup",

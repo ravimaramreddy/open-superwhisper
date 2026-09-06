@@ -247,21 +247,53 @@ test("Studio uses private forwards, owned instance, and reasoning off", async ()
   assert.equal(body.reasoning, "off");
   assert.equal(body.store, false);
   assert.equal(body.temperature, 0);
+  assert.ok(calls.some((args) => args.at(-1).includes("'--context-length' '16384'")));
   assert.equal(JSON.parse(body.input).transcript, "raw");
   await client.shutdown();
   assert.ok(calls.at(-1).at(-1).includes(`'unload' '${client.instance}'`));
   assert.ok(!calls.at(-1).at(-1).includes("someone-elses-model"));
 });
 
-test("Studio refuses truncated correction output", async () => {
+test("Studio accepts complete correction longer than 512 tokens", async () => {
   const client = new StudioClient({ prompts: { cleanup: "clean" } });
   client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
   client.ensureEditor = async () => {};
-  client.json = async () => ({
-    output: [{ type: "message", content: "Partial" }],
-    stats: { total_output_tokens: 512 },
-  });
-  await assert.rejects(client.edit({ text: "raw" }), /incomplete/);
+  const tokens = [...Array(767).fill("Edited "), "final detail."];
+  client.json = async (_url, options) => {
+    const generated = tokens.slice(0, JSON.parse(options.body).max_output_tokens);
+    return {
+      output: [{ type: "message", content: generated.join("") }],
+      stats: { total_output_tokens: generated.length },
+    };
+  };
+  try {
+    assert.equal(await client.edit({ text: "raw ".repeat(768) }), tokens.join(""));
+  } finally {
+    await client.shutdown();
+  }
+});
+
+test("Studio refuses exhausted correction output using every supported stop signal", async () => {
+  const client = new StudioClient({ prompts: { cleanup: "clean" } });
+  client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
+  client.ensureEditor = async () => {};
+  try {
+    for (const stop of [
+      { stats: { total_output_tokens: 4096 } },
+      { stats: { output_tokens: 4096 } },
+      { stats: { total_output_tokens: 4097 } },
+      { stats: { stop_reason: "max_tokens" } },
+      { stop_reason: "max_tokens" },
+    ]) {
+      client.json = async () => ({
+        output: [{ type: "message", content: "Partial" }],
+        ...stop,
+      });
+      await assert.rejects(client.edit({ text: "raw" }), /incomplete/);
+    }
+  } finally {
+    await client.shutdown();
+  }
 });
 
 function coldStudioFixture() {

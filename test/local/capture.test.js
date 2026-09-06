@@ -246,3 +246,101 @@ test("worklet drains a partial final block, averages stereo, and ignores post-st
   assert.deepEqual([...messages[0].samples], [0, 0.5]);
   assert.equal(messages[1].type, "flushed");
 });
+
+test("browser capture runs past two minutes, caps PCM at five and finishes only once", async (t) => {
+  const globals = ["navigator", "AudioContext", "AudioWorkletNode", "OfflineAudioContext"];
+  const original = globals.map((name) => Object.getOwnPropertyDescriptor(globalThis, name));
+  let port,
+    stops = 0,
+    limits = 0,
+    elapsed = 0;
+  const track = { readyState: "live", stop: () => stops++, onended: null };
+  const connection = () => ({ connect() {}, disconnect() {} });
+  const replacements = {
+    navigator: {
+      mediaDevices: {
+        getUserMedia: async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }),
+      },
+    },
+    AudioContext: class {
+      sampleRate = 16000;
+      state = "running";
+      audioWorklet = { addModule: async () => {} };
+      createMediaStreamSource = connection;
+      createGain = () => ({ ...connection(), gain: { value: 0 } });
+      resume = async () => {};
+      close = async () => {
+        this.state = "closed";
+      };
+    },
+    AudioWorkletNode: class {
+      constructor() {
+        port = this.port = {
+          onmessage: null,
+          close() {},
+          postMessage() {
+            this.onmessage({ data: { type: "flushed" } });
+          },
+        };
+      }
+      connect() {}
+      disconnect() {}
+    },
+    OfflineAudioContext: class {
+      createBuffer() {
+        return {
+          copyToChannel: (samples) => {
+            this.samples = samples;
+          },
+        };
+      }
+      createBufferSource() {
+        return { connect() {}, start() {} };
+      }
+      async startRendering() {
+        return { getChannelData: () => this.samples };
+      }
+    },
+  };
+  globals.forEach((name) =>
+    Object.defineProperty(globalThis, name, { configurable: true, value: replacements[name] })
+  );
+  t.after(() =>
+    globals.forEach((name, i) => {
+      if (original[i]) Object.defineProperty(globalThis, name, original[i]);
+      else delete globalThis[name];
+    })
+  );
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const recorder = await createBrowserRecorder({
+    signal: new AbortController().signal,
+    onLevel: (_level, ms) => {
+      elapsed = ms;
+    },
+    onEnded() {},
+    onLimit: () => limits++,
+  });
+  t.mock.timers.tick(120000);
+  assert.equal(limits, 0);
+  assert.equal(stops, 0);
+  const samples = new Float32Array(300 * 16000 + 16000);
+  samples[0] = 0.5;
+  samples[300 * 16000 - 1] = -0.5;
+  samples[300 * 16000] = 1;
+  port.onmessage({ data: { samples } });
+  assert.equal(elapsed, 300000);
+  t.mock.timers.tick(179999);
+  assert.equal(limits, 0);
+  t.mock.timers.tick(1);
+  assert.equal(limits, 1);
+  const [first, second] = await Promise.all([recorder.stop(), recorder.stop()]);
+  assert.equal(first, second);
+  assert.equal(first.durationMs, 300000);
+  assert.equal(first.audio.byteLength, 9600044);
+  const pcm = new DataView(first.audio);
+  assert.equal(pcm.getInt16(44, true), 16384);
+  assert.equal(pcm.getInt16(first.audio.byteLength - 2, true), -16384);
+  assert.equal(stops, 1);
+  t.mock.timers.tick(300000);
+  assert.equal(limits, 1);
+});

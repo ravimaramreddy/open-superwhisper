@@ -158,7 +158,7 @@ test("fixed Gemini request verifies pinned billing before token creation and pre
   assert.equal(requests[0].headers.Authorization, `Bearer ${TOKEN}`);
   assert.equal(requests[0].headers["x-goog-user-project"], CONFIG.projectId);
   const payload = JSON.parse(requests[0].body);
-  assert.equal(payload.generationConfig.maxOutputTokens, 4096);
+  assert.equal(payload.generationConfig.maxOutputTokens, 8192);
   assert.equal(payload.generationConfig.thinkingConfig.thinkingLevel, "LOW");
   assert.deepEqual(payload.generationConfig.responseSchema.required, [
     "raw_transcript",

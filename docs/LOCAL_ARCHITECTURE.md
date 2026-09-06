@@ -27,7 +27,7 @@ provider catalog, sync, calendar, meeting, chat, search or embedding services.
 The main process creates a recording identifier, snapshots settings and captures
 the target app before audio capture begins. Capture requests are fenced so a late
 microphone permission result cannot restart a cancelled recording. Audio is mono
-16 kHz PCM16 WAV, limited to two minutes, validated again in the main process.
+16 kHz PCM16 WAV, limited to five minutes, validated again in the main process.
 Flat silence is rejected; this is not a general background-noise classifier.
 
 Only one inference request owns the recording. Automatic mode first tries Studio

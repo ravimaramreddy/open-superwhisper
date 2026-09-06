@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   retainAudio: false,
   launchAtLogin: false,
 });
+const { maxRecordingSeconds } = require("../local-runtime/recording-limits.json");
 const MAX_AUDIO_BYTES = 60 * 1024 * 1024;
 const MAX_SETTINGS_BYTES = 128 * 1024;
 
@@ -146,7 +147,8 @@ function validateWav(audio) {
   }
   if (!format || !data || data.length === 0 || data.length % 2)
     throw new Error("WAV contains no complete audio samples");
-  if (data.length / 32 > 120_000) throw new Error("Recordings are limited to two minutes");
+  if (data.length / 32000 > maxRecordingSeconds)
+    throw new Error(`Recordings are limited to ${maxRecordingSeconds / 60} minutes`);
   let peak = 0;
   for (let offset = 0; offset < data.length; offset += 2)
     peak = Math.max(peak, Math.abs(data.readInt16LE(offset)));
