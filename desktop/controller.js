@@ -1,12 +1,22 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
-const { atomicWrite, MAX_TEXT } = require("./history");
+const { atomicWrite, textVersion, MAX_TEXT } = require("./history");
 const { DEFAULT_VOCABULARY, normalizeVocabulary } = require("./vocabulary");
+const {
+  MODES,
+  STYLES,
+  validApp,
+  normalizeAppRules,
+  effectiveSettings,
+} = require("./editing-settings");
 
 const DEFAULT_SETTINGS = Object.freeze({
   profile: "auto",
   cleanup: true,
+  editingMode: "polished",
+  style: "neutral",
+  appRules: [],
   format: "prose",
   vocabulary: DEFAULT_VOCABULARY,
   microphoneId: "default",
@@ -15,6 +25,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   launchAtLogin: false,
 });
 const MAX_AUDIO_BYTES = 60 * 1024 * 1024;
+const MAX_SETTINGS_BYTES = 128 * 1024;
 
 function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch))
@@ -25,6 +36,12 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
     const value = patch[key];
     if (key === "profile" && !["auto", "studio", "air"].includes(value))
       throw new Error("Invalid profile");
+    if (key === "editingMode" && !MODES.has(value)) throw new Error("Invalid editing mode");
+    if (key === "style" && !STYLES.has(value)) throw new Error("Invalid writing style");
+    if (key === "appRules") {
+      next[key] = normalizeAppRules(value);
+      continue;
+    }
     if (key === "format" && !["prose", "paragraphs", "list"].includes(value))
       throw new Error("Invalid text format");
     if (key === "vocabulary") {
@@ -47,12 +64,15 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
     }
     next[key] = value;
   }
+  // Older preferences have only cleanup. A new explicit mode takes precedence.
+  if (Object.hasOwn(patch, "editingMode")) next.cleanup = next.editingMode !== "exact";
+  else if (Object.hasOwn(patch, "cleanup")) next.editingMode = patch.cleanup ? "polished" : "exact";
   return next;
 }
 
 function readSettings(file) {
   try {
-    if (fs.statSync(file).size > 64 * 1024) return { ...DEFAULT_SETTINGS };
+    if (fs.statSync(file).size > MAX_SETTINGS_BYTES) return { ...DEFAULT_SETTINGS };
     return normalizeSettings(JSON.parse(fs.readFileSync(file, "utf8")));
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -206,6 +226,9 @@ class Controller {
       .then(async () => {
         const previous = this.state.settings;
         const next = normalizeSettings(patch, previous);
+        // Use the same serialized limit as the reader, before changing OS settings.
+        if (Buffer.byteLength(JSON.stringify(next, null, 2)) > MAX_SETTINGS_BYTES)
+          throw new Error("Settings are too large. Shorten some vocabulary or app names.");
         await this.applySettings(next, previous);
         try {
           atomicWrite(this.settingsFile, next);
@@ -277,6 +300,12 @@ class Controller {
     try {
       request.target = await this.native.captureTarget();
       this.assertOwned(request);
+      const app = request.target && {
+        bundleId: request.target.bundleId,
+        name: request.target.name || request.target.bundleId,
+      };
+      request.targetApp = validApp(app) ? app : undefined;
+      request.settings = effectiveSettings(request.settings, request.targetApp);
       return { requestId: request.id, settings: structuredClone(request.settings) };
     } catch (error) {
       if (this.active === request) {
@@ -332,6 +361,8 @@ class Controller {
         audioPath,
         profile: request.settings.profile,
         cleanup: request.settings.cleanup,
+        editingMode: request.settings.editingMode,
+        style: request.settings.style,
         vocabulary: request.settings.vocabulary,
         format: request.settings.format,
         signal: request.abort.signal,
@@ -363,6 +394,15 @@ class Controller {
           : "off",
         durationMs: wav.durationMs,
         timings: result.timings,
+        editingMode: request.settings.editingMode,
+        style: request.settings.style,
+        format: request.settings.format,
+        edit: {
+          source: "dictation",
+          profile: result.actualProfile,
+          elapsedMs: result.timings.cleanupMs,
+        },
+        ...(request.targetApp ? { targetApp: request.targetApp } : {}),
         delivery: "pending",
         ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
         ...(result.candidateText
@@ -374,6 +414,15 @@ class Controller {
             ? { warning: "Cleanup returned no text. The original transcript was kept." }
             : {}),
       };
+      if (record.text !== record.rawText && !record.candidateText) {
+        record.previousVersion = {
+          text: record.rawText,
+          cleanupStatus: "off",
+          editingMode: "exact",
+          style: "neutral",
+          format: "prose",
+        };
+      }
       this.state.latest = record;
       // A failed disk save prevents automatic paste; latest remains available to copy.
       this.history.save(record, { persist: request.settings.historyEnabled });
@@ -477,28 +526,51 @@ class Controller {
     this.idleRequired();
     const record = this.history.get(id);
     if (!record) throw new Error("Transcript not found");
+    const settings = effectiveSettings(this.state.settings, record.targetApp);
     const request = { id: randomUUID(), abort: new AbortController(), submitted: true };
     this.active = request;
     this.state.phase = "processing";
-    this.state.progress = "Rewriting…";
+    this.state.progress = "Editing the original transcript…";
     this.state.error = null;
     this.emit();
     try {
-      const result = await this.inference.rewrite({
-        text: record.text,
-        vocabulary: structuredClone(this.state.settings.vocabulary),
-        format: this.state.settings.format,
-        signal: request.abort.signal,
-      });
+      const result =
+        settings.editingMode === "exact"
+          ? { text: record.rawText, cleanupStatus: "off", timings: { cleanupMs: 0 } }
+          : await this.inference.rewrite({
+              text: record.rawText,
+              profile: settings.profile,
+              editingMode: settings.editingMode,
+              style: settings.style,
+              vocabulary: settings.vocabulary,
+              format: settings.format,
+              signal: request.abort.signal,
+            });
       this.assertOwned(request);
       const text = typeof result === "string" ? result : result?.text;
       if (typeof text !== "string" || !text.trim() || text.length > MAX_TEXT)
         throw new Error("The model returned an invalid rewrite");
       const updated = this.history.update(id, {
-        text,
+        text: result.candidateText ? record.text : text,
+        cleanupStatus: result.candidateText
+          ? record.cleanupStatus
+          : settings.editingMode === "exact"
+            ? "off"
+            : "applied",
         candidateText: result.candidateText,
         reviewReasons: result.reviewReasons,
         warning: result.warning,
+        editingMode: settings.editingMode,
+        style: settings.style,
+        format: settings.format,
+        edit: {
+          source: "retry",
+          profile: result.actualProfile || record.edit?.profile || record.actualProfile,
+          elapsedMs: result.timings?.cleanupMs || 0,
+          ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+        },
+        previousVersion: textVersion(record),
+        historyEdited: true,
       });
       if (this.state.latest?.id === id) this.state.latest = updated;
       return updated;
@@ -514,6 +586,43 @@ class Controller {
         this.emit();
       }
     }
+  }
+
+  async undoTranscript(id) {
+    this.idleRequired();
+    const record = this.history.get(id);
+    if (!record?.previousVersion) throw new Error("No previous edit to restore");
+    const updated = this.history.update(id, {
+      ...textVersion(record.previousVersion),
+      previousVersion: undefined,
+      historyEdited: true,
+    });
+    if (this.state.latest?.id === id) this.state.latest = updated;
+    this.emit();
+    return updated;
+  }
+
+  async acceptSuggestion(id) {
+    this.idleRequired();
+    const record = this.history.get(id);
+    if (!record?.candidateText) throw new Error("No suggested edit to use");
+    const updated = this.history.update(id, {
+      text: record.candidateText,
+      cleanupStatus: "applied",
+      candidateText: undefined,
+      reviewReasons: undefined,
+      warning: undefined,
+      previousVersion: textVersion(record),
+      historyEdited: true,
+      edit: {
+        source: "accepted",
+        profile: record.edit?.profile || record.actualProfile,
+        elapsedMs: record.edit?.elapsedMs || record.timings.cleanupMs,
+      },
+    });
+    if (this.state.latest?.id === id) this.state.latest = updated;
+    this.emit();
+    return updated;
   }
 
   async deleteTranscript(id) {

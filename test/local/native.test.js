@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createNative } = require("../../desktop/native");
 
-function fixture(paste, delay = async () => {}) {
+function fixture(paste) {
   let text = "previous clipboard";
   const clipboard = {
     availableFormats: () => ["text/plain"],
@@ -18,7 +18,7 @@ function fixture(paste, delay = async () => {}) {
     },
   };
   const bridge = paste ? { paste, accessibility: () => true } : null;
-  return { native: createNative({ clipboard, bridge, delay }), clipboard };
+  return { native: createNative({ clipboard, bridge }), clipboard };
 }
 const target = { pid: 123, bundleId: "com.example.editor" };
 
@@ -45,17 +45,17 @@ test("unexpected native exception is uncertain and never retried", async () => {
   assert.equal(clipboard.readText(), "result");
 });
 
-test("successful dispatch restores clipboard, but preserves a user's newer copy", async () => {
-  const first = fixture(() => ({ status: "dispatched" }));
-  assert.equal((await first.native.deliver({ text: "result", target })).delivery, "dispatched");
-  assert.equal(first.clipboard.readText(), "previous clipboard");
-  let clipboard;
-  const second = fixture(
-    () => ({ status: "dispatched" }),
-    async () => clipboard.writeText("new user copy")
+test("dispatch leaves text for a delayed target and never overwrites a newer copy", async () => {
+  const { native, clipboard } = fixture(() => ({ status: "dispatched" }));
+  assert.equal((await native.deliver({ text: "result", target })).delivery, "dispatched");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(
+    clipboard.readText(),
+    "result",
+    "a busy app consumes the dictation, not old clipboard data"
   );
-  clipboard = second.clipboard;
-  await second.native.deliver({ text: "result", target });
+  clipboard.writeText("new user copy");
+  await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(clipboard.readText(), "new user copy");
 });
 
@@ -89,30 +89,20 @@ test("missing target or missing native component gives manual copy without keybo
   assert.equal(native.accessibility(), false);
 });
 
-test("queued cancellation prevents a second paste and preserves restored clipboard", async () => {
-  let release;
-  const gate = new Promise((resolve) => {
-    release = resolve;
-  });
+test("queued cancellation prevents a second paste and retains first text", async () => {
   let calls = 0;
-  const { native, clipboard } = fixture(
-    () => {
-      calls++;
-      return { status: "dispatched" };
-    },
-    () => gate
-  );
+  const { native, clipboard } = fixture(() => {
+    calls++;
+    return { status: "dispatched" };
+  });
   const one = native.deliver({ text: "one", target });
-  await new Promise((resolve) => setImmediate(resolve));
   const abort = new AbortController();
   const two = native.deliver({ text: "two", target, signal: abort.signal });
   abort.abort();
-  assert.equal(calls, 1);
-  release();
   await one;
   assert.equal((await two).delivery, "cancelled");
   assert.equal(calls, 1);
-  assert.equal(clipboard.readText(), "previous clipboard");
+  assert.equal(clipboard.readText(), "one");
 });
 
 test("permission denial and allocation failure preserve text without retries", async () => {
@@ -150,39 +140,16 @@ test("readiness and target capture use the same in-process bridge as paste", asy
   assert.equal(await native.captureTarget(), null);
 });
 
-test("text and HTML are restored together with atomic replacement semantics", async () => {
-  const original = {
-    text: "Original words",
-    html: "<b>Original words</b>",
-    rtf: "{\\rtf1 Original words}",
-  };
-  let data = { ...original };
-  let writes = 0;
+test("delivery never reads or snapshots unrelated clipboard content", async () => {
+  let text;
   const clipboard = {
-    availableFormats: () => ["text/plain", "text/html", "text/rtf"],
-    readText: () => data.text || "",
-    readHTML: () => data.html || "",
-    readRTF: () => data.rtf || "",
-    writeText: (text) => {
-      data = { text };
-    },
-    write: (value) => {
-      writes++;
-      data = { ...value };
-    },
-    clear: () => {
-      data = {};
-    },
-    writeBuffer: () => {
-      assert.fail("per-format writes destroy earlier formats");
+    availableFormats: () => assert.fail("must not inspect clipboard"),
+    readText: () => assert.fail("must not read clipboard"),
+    writeText: (value) => {
+      text = value;
     },
   };
-  const native = createNative({
-    clipboard,
-    bridge: { paste: () => ({ status: "dispatched" }) },
-    delay: async () => {},
-  });
-  assert.equal((await native.deliver({ text: "dictated", target })).delivery, "dispatched");
-  assert.deepEqual(data, original);
-  assert.equal(writes, 1);
+  const native = createNative({ clipboard, bridge: { paste: () => ({ status: "dispatched" }) } });
+  await native.deliver({ text: "dictated", target });
+  assert.equal(text, "dictated");
 });

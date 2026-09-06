@@ -20,11 +20,15 @@ import {
   Sparkles,
   Square,
   Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import type { AppState, Profile, Settings, Transcript } from "../desktop/contracts";
 import { CaptureController, type CaptureView } from "./capture";
 import { shortcutFromEvent } from "./shortcut";
+import { TextChanges } from "./TextChanges";
+import { ModePicker, WritingOptions } from "./EditingControls";
+import { AppRules } from "./AppRules";
 
 const initialCapture: CaptureView = { phase: "idle", level: 0, elapsedMs: 0 };
 const shortcutLabel = (value: string) =>
@@ -39,6 +43,7 @@ const shortcutLabel = (value: string) =>
     .replace("Space", "Space");
 const timeLabel = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+const secondsLabel = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(2)}s`;
 type VocabularyEntry = Settings["vocabulary"][number];
 const cleanTerm = (value: string) => value.trim().replace(/\s+/g, " ");
 const termKey = (value: string) => cleanTerm(value).toLocaleLowerCase("en");
@@ -410,6 +415,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
   function transcriptCard(item: Transcript, latest = false) {
     const rewriteBusy = action === `rewrite-${item.id}`;
     const guarded = !!item.candidateText && !!item.reviewReasons?.length;
+    const editedLater = item.edit && item.edit.source !== "dictation";
     return (
       <article className={`transcript-card ${latest ? "latest-card" : ""}`} key={item.id}>
         <div className="transcript-meta">
@@ -427,6 +433,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
             {timeLabel(item.durationMs)}
           </span>
         </div>
+        {item.targetApp?.name && <p className="transcript-app">{item.targetApp.name}</p>}
         {latest ? (
           <p className="latest-text">{item.text || t("originalEmpty")}</p>
         ) : (
@@ -441,6 +448,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
             </section>
           </div>
         )}
+        <TextChanges before={item.rawText} after={item.text} label={t("changesFromOriginal")} />
         <div className="transcript-notes">
           <span>
             {t(
@@ -454,6 +462,9 @@ export default function App({ preview = false }: { preview?: boolean }) {
             )}
           </span>
           {item.fallbackReason && <span>{t("fallbackUsed")}</span>}
+          {item.editingMode && <span>{t(`mode_${item.editingMode}`)}</span>}
+          {item.style && item.editingMode !== "exact" && <span>{t(`style_${item.style}`)}</span>}
+          {item.format && item.editingMode !== "exact" && <span>{t(`format_${item.format}`)}</span>}
         </div>
         {guarded && (
           <details className="review-suggestion">
@@ -477,23 +488,44 @@ export default function App({ preview = false }: { preview?: boolean }) {
                 <p>{item.candidateText}</p>
               </section>
             </div>
-            <button
-              className="text-button"
-              disabled={locked}
-              onClick={() =>
-                void perform(
-                  `copy-${item.id}`,
-                  () => api.copyTranscript(item.id, "suggestion"),
-                  t("copied")
-                )
-              }
-            >
-              <Copy size={13} />
-              {t("copySuggestion")}
-            </button>
+            <TextChanges
+              before={item.text}
+              after={item.candidateText!}
+              label={t("suggestedChanges")}
+            />
+            <div className="suggestion-actions">
+              <button
+                className="small-button save-button"
+                disabled={locked}
+                onClick={() =>
+                  void perform(
+                    `accept-${item.id}`,
+                    () => api.acceptSuggestion(item.id),
+                    t("suggestionAccepted")
+                  )
+                }
+              >
+                <Check size={13} />
+                {t("useSuggestion")}
+              </button>
+              <button
+                className="text-button"
+                disabled={locked}
+                onClick={() =>
+                  void perform(
+                    `copy-${item.id}`,
+                    () => api.copyTranscript(item.id, "suggestion"),
+                    t("copied")
+                  )
+                }
+              >
+                <Copy size={13} />
+                {t("copySuggestion")}
+              </button>
+            </div>
           </details>
         )}
-        {latest && (
+        {latest && !editedLater && !item.historyEdited && (
           <p className={`delivery ${item.delivery === "dispatched" ? "" : "delivery-attention"}`}>
             {t(
               item.delivery === "dispatched"
@@ -508,6 +540,50 @@ export default function App({ preview = false }: { preview?: boolean }) {
             )}
           </p>
         )}
+        {(editedLater || item.historyEdited) && (
+          <p className="history-action-note">{t("historyEditOnly")}</p>
+        )}
+        <details className="transcript-performance">
+          <summary>{t("processingDetails")}</summary>
+          <p>{t("originalRoute", { machine: t(item.actualProfile) })}</p>
+          <dl className="timing-list">
+            <div>
+              <dt>{t("speechTiming")}</dt>
+              <dd>{secondsLabel(item.timings.asrMs)}</dd>
+            </div>
+            <div>
+              <dt>{t("cleanupTiming")}</dt>
+              <dd>{secondsLabel(item.timings.cleanupMs)}</dd>
+            </div>
+            <div>
+              <dt>{t("totalTiming")}</dt>
+              <dd>{secondsLabel(item.timings.totalMs)}</dd>
+            </div>
+          </dl>
+          {item.fallbackReason && (
+            <p className="fallback-detail">
+              {t("fallbackReason", { reason: item.fallbackReason })}
+            </p>
+          )}
+          {editedLater && (
+            <p className="edit-timing">
+              {t(
+                item.edit!.source === "accepted"
+                  ? "acceptedTiming"
+                  : item.editingMode === "exact"
+                    ? "exactRetry"
+                    : "retryTiming",
+                {
+                  machine: t(item.edit!.profile),
+                  time: secondsLabel(item.edit!.elapsedMs),
+                }
+              )}
+            </p>
+          )}
+          {item.edit?.fallbackReason && (
+            <p>{t("retryFallbackReason", { reason: item.edit.fallbackReason })}</p>
+          )}
+        </details>
         {item.warning && <p className="item-warning">{item.warning}</p>}
         <div className="transcript-actions">
           <button
@@ -536,7 +612,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
             }
           >
             <Copy size={13} />
-            {t(guarded ? "copyKept" : "copyEdited")}
+            {t("copyCurrent")}
           </button>
           <button
             className="text-button"
@@ -547,19 +623,40 @@ export default function App({ preview = false }: { preview?: boolean }) {
             <BookOpen size={13} />
             {t("rememberCorrection")}
           </button>
+          <button
+            className="text-button rewrite-button"
+            title={t("rewriteDescription")}
+            disabled={locked}
+            onClick={() =>
+              void perform(
+                `rewrite-${item.id}`,
+                () => api.rewriteTranscript(item.id),
+                t("retryFinished")
+              )
+            }
+          >
+            {rewriteBusy ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}
+            {t(rewriteBusy ? "rewriting" : "rewrite")}
+          </button>
+          {item.previousVersion && (
+            <button
+              className="text-button"
+              disabled={locked}
+              title={t("undoDescription")}
+              onClick={() =>
+                void perform(
+                  `undo-${item.id}`,
+                  () => api.undoTranscript(item.id),
+                  t("undoFinished")
+                )
+              }
+            >
+              <Undo2 size={13} />
+              {t("undo")}
+            </button>
+          )}
           {!latest && (
             <>
-              <button
-                className="text-button rewrite-button"
-                title={t("rewriteDescription")}
-                disabled={locked || state!.studio !== "ready"}
-                onClick={() =>
-                  void perform(`rewrite-${item.id}`, () => api.rewriteTranscript(item.id))
-                }
-              >
-                {rewriteBusy ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}
-                {t(rewriteBusy ? "rewriting" : "rewrite")}
-              </button>
               <button
                 className="icon-button delete-button"
                 aria-label={t("delete")}
@@ -577,6 +674,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
             </>
           )}
         </div>
+        <p className="transcript-action-hint">{t("historyActionsDetail")}</p>
         {rememberId === item.id && (
           <div className="remember-form">
             <h3>{t("rememberCorrection")}</h3>
@@ -750,17 +848,19 @@ export default function App({ preview = false }: { preview?: boolean }) {
               </div>
               <div className="dictation-controls">
                 {routePicker()}
-                <label className="cleanup-check">
-                  <input
-                    type="checkbox"
-                    checked={state.settings.cleanup}
-                    disabled={locked}
-                    onChange={(event) => void save({ cleanup: event.target.checked })}
-                  />
-                  <Sparkles size={14} />
-                  {t("cleanup")}
-                </label>
+                <ModePicker
+                  value={state.settings.editingMode}
+                  disabled={locked}
+                  onChange={(editingMode) => void save({ editingMode })}
+                />
               </div>
+              <p className="mode-detail">{t(`modeDetail_${state.settings.editingMode}`)}</p>
+              {state.settings.editingMode !== "exact" && (
+                <p className="model-mode-detail">{t("compactEditorDetail")}</p>
+              )}
+              {!!state.settings.appRules?.length && (
+                <p className="model-mode-detail">{t("appRulesActive")}</p>
+              )}
               <p className="recording-limit">
                 {state.phase === "setup" && state.progress ? state.progress : t("durationLimit")}
               </p>
@@ -888,34 +988,34 @@ export default function App({ preview = false }: { preview?: boolean }) {
                     </div>
                     {routePicker()}
                   </div>
-                  {switchControl(
-                    t("cleanup"),
-                    t("cleanupDetail"),
-                    state.settings.cleanup,
-                    () => void save({ cleanup: !state.settings.cleanup })
-                  )}
-                  <div className="setting-row">
+                  <div className="setting-row editing-setting">
                     <div>
-                      <label htmlFor="format-select" className="setting-label">
-                        {t("format")}
-                      </label>
-                      <p>{t("formatDetail")}</p>
+                      <span className="setting-label">{t("defaultEditing")}</span>
+                      <p>{t(`modeDetail_${state.settings.editingMode}`)}</p>
                     </div>
-                    <select
-                      id="format-select"
-                      value={state.settings.format}
-                      disabled={locked || !state.settings.cleanup}
-                      onChange={(event) =>
-                        void save({ format: event.target.value as Settings["format"] })
-                      }
-                    >
-                      <option value="prose">{t("formatProse")}</option>
-                      <option value="paragraphs">{t("formatParagraphs")}</option>
-                      <option value="list">{t("formatList")}</option>
-                    </select>
+                    <ModePicker
+                      value={state.settings.editingMode}
+                      disabled={locked}
+                      onChange={(editingMode) => void save({ editingMode })}
+                    />
+                    <WritingOptions
+                      id="defaults"
+                      value={state.settings}
+                      disabled={locked}
+                      onChange={(patch) => void save(patch)}
+                    />
+                    <p className="setting-explanation">
+                      {t("compactEditorDetail")} {t("formatDetail")}
+                    </p>
                   </div>
                 </div>
               </section>
+              <AppRules
+                settings={state.settings}
+                transcripts={state.latest ? [state.latest, ...state.history] : state.history}
+                disabled={locked}
+                onChange={(appRules) => void save({ appRules })}
+              />
               <section className="settings-group">
                 <h2>{t("vocabularyGroup")}</h2>
                 <div className="settings-card vocabulary-card">

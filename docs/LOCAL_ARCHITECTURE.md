@@ -11,6 +11,7 @@ provider catalog, sync, calendar, meeting, chat, search or embedding services.
 | `desktop/history.js`             | Atomic, bounded history; immutable original; delivery claims  |
 | `desktop/vocabulary.js`          | Bounded dictionary validation and protected phrase matching   |
 | `desktop/edit-review.js`         | Best-effort checks; retained text plus reviewable suggestions |
+| `desktop/editing-settings.js`    | Bounded app rules and editing choices                         |
 | `desktop/native.js`              | Frontmost-app check, clipboard and single paste attempt       |
 | `resources/macos-local-paste.mm` | Native target validation and keyboard dispatch                |
 | `desktop/inference.js`           | Fixed profiles, fallback, setup and lifetime                  |
@@ -34,7 +35,13 @@ ASR, falls back to local ASR when unavailable, then applies the matching optiona
 editor. Correction failure retains raw text. Cancellation invalidates the owner
 and aborts the local worker/request so late completions cannot initiate delivery.
 
-Settings snapshots include a deep copy of vocabulary and the formatting choice.
+Settings snapshots include a deep copy of vocabulary, editing mode, style and format.
+App rules (at most 32) match the captured bundle identifier; only the app name and
+identifier are retained, never its screen or document contents. Rules override
+the global editing mode/style/format. Legacy cleanup=false maps to Exact and
+cleanup=true to Polished; explicit editingMode takes precedence. The legacy
+boolean stays synchronized for compatibility. The reader and writer share a
+128 KiB settings limit, checked before applying operating-system preferences.
 Older settings receive defaults without replacing saved microphone, shortcut,
 login, profile or history preferences. Vocabulary uses the existing serialized,
 atomic settings update path and remains private app data.
@@ -47,11 +54,30 @@ raw ASR when it flags an automatic edit. Optional `candidateText`/`reviewReasons
 are stored alongside the retained text in version-1 history. A deliberate rewrite
 keeps the previous edited text when flagged; raw ASR is always immutable. Only an
 explicit Copy suggestion action copies the candidate, never a second paste.
+Use suggestion accepts it in History; Undo restores one previous text version.
+The optional previousVersion is nonrecursive and validated, and old records load
+without it. Updates preserve identity, ASR text, speech timings and original route.
+Every write is bounded by the same 24 MB limit used when reading history; a failed
+save leaves the existing file intact. History-disabled results and edits stay in
+memory. Word diffs use bounded tokenization and capped work with a plain removed/
+added fallback for very large edits, never HTML from model output.
+
+Retry uses immutable rawText with current global settings and the matching app
+rule, rather than repeatedly rewriting prior output. Exact bypasses inference.
+Text-only retries use Studio/Air routing, with Auto falling back only on a Studio
+connection-unavailable result. Air has a dedicated text-only worker method; it
+does not rerun ASR. Retry/acceptance provenance and timings are separate from the
+original speech run. A separate historyEdited marker survives Undo, including
+restoration of raw text with no editor provenance. A flagged retry retains the current text. No History action
+claims another automatic delivery.
 
 History is saved before delivery and claims each automatic delivery once. The
 native addon checks the focused process immediately before dispatching ⌘V. It
 does not refocus another application or retry uncertain delivery. Keyboard
 injection confirms dispatch, not acceptance by arbitrary target applications.
+The clipboard retains the transcript after dispatch. There is no timed restoration:
+a slow target may not consume a posted paste until after an arbitrary delay, and
+a later user copy must never be overwritten by a restoration timer.
 
 ## Persistent installation
 

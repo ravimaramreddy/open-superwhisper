@@ -186,14 +186,51 @@ class AirWorkerClient {
     return this.closing;
   }
 
-  async process({ audioPath, cleanup, vocabulary = [], format = "prose", signal }) {
-    throwIfAborted(signal);
+  async process({
+    audioPath,
+    cleanup,
+    editingMode,
+    style = "neutral",
+    vocabulary = [],
+    format = "prose",
+    signal,
+  }) {
     const params = {
       audioPath,
       cleanup,
+      editingMode: editingMode ?? (cleanup === false ? "exact" : "polished"),
+      style,
       vocabulary: normalizeVocabulary(vocabulary),
       format: ["paragraphs", "list"].includes(format) ? format : "prose",
     };
+    return this.request("process", params, signal);
+  }
+
+  async rewrite({
+    text,
+    editingMode = "polished",
+    style = "neutral",
+    vocabulary = [],
+    format = "prose",
+    signal,
+  }) {
+    if (typeof text !== "string" || text.length > 32768)
+      throw new Error("Invalid or oversized transcript");
+    return this.request(
+      "rewrite",
+      {
+        text,
+        editingMode,
+        style,
+        vocabulary: normalizeVocabulary(vocabulary),
+        format: ["paragraphs", "list"].includes(format) ? format : "prose",
+      },
+      signal
+    );
+  }
+
+  async request(method, params, signal) {
+    throwIfAborted(signal);
     if (this.busy)
       throw Object.assign(new Error("Local inference is already running"), { code: "BUSY" });
     this.busy = true;
@@ -213,7 +250,7 @@ class AirWorkerClient {
           JSON.stringify({
             v: 1,
             id,
-            method: "process",
+            method,
             params,
           }) + "\n"
         );

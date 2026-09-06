@@ -258,6 +258,8 @@ async function start() {
     cancel: (requestId) => controller.cancel(requestId),
     "copy-transcript": (id, source) => controller.copyTranscript(id, source),
     "rewrite-transcript": (id) => controller.rewriteTranscript(id),
+    "undo-transcript": (id) => controller.undoTranscript(id),
+    "accept-suggestion": (id) => controller.acceptSuggestion(id),
     "delete-transcript": (id) => controller.deleteTranscript(id),
     "hide-window": () => {
       window.hide();

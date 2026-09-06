@@ -8,6 +8,22 @@ const { normalizeVocabulary } = require("./vocabulary");
 function unavailable(message, cause) {
   return Object.assign(new Error(message, { cause }), { code: "STUDIO_UNAVAILABLE" });
 }
+function connectionFailure(error) {
+  return (
+    error.name === "TimeoutError" ||
+    [502, 503, 504].includes(error.status) ||
+    [
+      "ECONNREFUSED",
+      "ECONNRESET",
+      "EHOSTUNREACH",
+      "ENETUNREACH",
+      "ETIMEDOUT",
+      "EPIPE",
+      "UND_ERR_CONNECT_TIMEOUT",
+      "UND_ERR_SOCKET",
+    ].includes(error.code || error.cause?.code)
+  );
+}
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -83,6 +99,7 @@ class StudioClient {
       return result;
     } catch (error) {
       if (signal?.aborted) throw abortError();
+      if (connectionFailure(error)) throw unavailable("Mac Studio is unavailable", error);
       throw error;
     }
   }
@@ -194,8 +211,9 @@ class StudioClient {
       return result.text.trim();
     } catch (error) {
       if (signal?.aborted || error.name === "AbortError") throw abortError();
-      if (error.status && error.status < 500) throw error;
-      throw unavailable("Mac Studio speech recognition is unavailable", error);
+      // Invalid output and model errors are not a reason to select another
+      // machine. Only a connection failure may activate Auto fallback.
+      throw error;
     }
   }
 
@@ -245,6 +263,7 @@ class StudioClient {
         clearTimeout(timer);
         signal.removeEventListener("abort", onAbort);
         if (code === 0) resolve();
+        else if (code === 255) reject(unavailable("Mac Studio connection is unavailable"));
         else reject(new Error(`Studio model command failed (${code ?? "connection closed"})`));
       });
     });
@@ -286,9 +305,21 @@ class StudioClient {
     }
   }
 
-  async edit({ text, rewrite = false, vocabulary = [], format = "prose", signal }) {
+  async edit({
+    text,
+    rewrite = false,
+    editingMode = "polished",
+    style = "neutral",
+    vocabulary = [],
+    format = "prose",
+    signal,
+  }) {
     signal = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
     throwIfAborted(signal);
+    if (!["exact", "clean", "polished"].includes(editingMode))
+      throw new Error("Invalid editing mode");
+    if (!["neutral", "chat", "email"].includes(style)) throw new Error("Invalid text style");
+    if (editingMode === "exact") return text;
     if (!text.trim()) return "";
     const tunnel = await awaitAbortable(this.connect(), signal);
     throwIfAborted(signal);
@@ -301,9 +332,9 @@ class StudioClient {
       transcript: text,
       vocabulary: normalizeVocabulary(vocabulary),
       format: ["paragraphs", "list"].includes(format) ? format : "prose",
+      editing_mode: editingMode,
+      style,
     };
-    if (rewrite)
-      input.editing_instruction = "Improve clarity and organization without changing meaning.";
     const result = await this.json(
       `${tunnel.editor}/api/v1/chat`,
       {
@@ -313,7 +344,9 @@ class StudioClient {
         body: JSON.stringify({
           model: this.instance,
           input: JSON.stringify(input),
-          system_prompt: rewrite ? this.prompts.rewrite : this.prompts.cleanup,
+          // Retry starts from the original under exactly the same editing
+          // instructions as dictation; only the progress message differs.
+          system_prompt: this.prompts.cleanup,
           temperature: 0,
           max_output_tokens: 512,
           reasoning: "off",

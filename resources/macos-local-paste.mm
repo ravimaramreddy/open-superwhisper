@@ -53,7 +53,7 @@ napi_value captureTarget(napi_env env, napi_callback_info info) {
   if (!onMainThread(env) || !noArguments(env, info)) return nullptr;
   @autoreleasepool {
     NSRunningApplication *target = NSWorkspace.sharedWorkspace.frontmostApplication;
-    napi_value result, pid, bundleId;
+    napi_value result, pid, bundleId, name;
     if (!target || target.processIdentifier <= 0) {
       if (!check(env, napi_get_null(env, &result))) return nullptr;
       return result;
@@ -62,7 +62,9 @@ napi_value captureTarget(napi_env env, napi_callback_info info) {
     if (!check(env, napi_create_object(env, &result)) ||
         !check(env, napi_create_int32(env, target.processIdentifier, &pid)) ||
         !check(env, napi_create_string_utf8(env, identifier, NAPI_AUTO_LENGTH, &bundleId)) ||
+        !check(env, napi_create_string_utf8(env, (target.localizedName ?: target.bundleIdentifier ?: @"").UTF8String, NAPI_AUTO_LENGTH, &name)) ||
         !check(env, napi_set_named_property(env, result, "pid", pid)) ||
+        !check(env, napi_set_named_property(env, result, "name", name)) ||
         !check(env, napi_set_named_property(env, result, "bundleId", bundleId))) return nullptr;
     return result;
   }

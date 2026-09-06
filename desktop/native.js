@@ -7,12 +7,7 @@ function loadBridge(binary) {
   }
 }
 
-function createNative({
-  binary,
-  clipboard,
-  bridge = loadBridge(binary),
-  delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-}) {
+function createNative({ binary, clipboard, bridge = loadBridge(binary) }) {
   let queue = Promise.resolve();
   function accessibility() {
     try {
@@ -31,44 +26,21 @@ function createNative({
     if (!Number.isInteger(result?.pid) || result.pid <= 0 || result.pid === process.pid)
       return null;
     if (typeof result.bundleId !== "string") return null;
-    return { pid: result.pid, bundleId: result.bundleId };
-  }
-  function snapshotClipboard() {
-    try {
-      const formats = clipboard.availableFormats();
-      // Electron's typed readers translate standard MIME names to macOS types.
-      // Unsupported custom formats cannot be faithfully restored with this API.
-      const supported = new Set([
-        "text/plain",
-        "text/html",
-        "text/rtf",
-        "image/png",
-        "image/jpeg",
-        "image/tiff",
-      ]);
-      if (formats.some((format) => !supported.has(format))) return null;
-      const data = {};
-      if (formats.includes("text/plain")) data.text = clipboard.readText();
-      if (formats.includes("text/html")) data.html = clipboard.readHTML();
-      if (formats.includes("text/rtf")) data.rtf = clipboard.readRTF();
-      let bytes = Object.values(data).reduce((sum, value) => sum + Buffer.byteLength(value), 0);
-      if (formats.some((format) => format.startsWith("image/"))) {
-        data.image = clipboard.readImage();
-        if (data.image.isEmpty()) return null;
-        bytes += data.image.toPNG().length;
-      }
-      if (bytes > 8 * 1024 * 1024) return null;
-      return data;
-    } catch {
-      return null;
-    }
+    return {
+      pid: result.pid,
+      bundleId: result.bundleId,
+      ...(typeof result.name === "string" &&
+      result.name.length <= 160 &&
+      ![...result.name].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+        ? { name: result.name }
+        : {}),
+    };
   }
   async function deliver({ text, target, signal }) {
     const operation = queue
       .catch(() => {})
       .then(async () => {
         if (signal?.aborted) return { delivery: "cancelled" };
-        const original = snapshotClipboard();
         clipboard.writeText(text);
         if (!bridge)
           return {
@@ -92,16 +64,8 @@ function createNative({
           result = null;
         }
         if (result?.status === "dispatched") {
-          await delay(180);
-          if (original && clipboard.readText() === text) {
-            try {
-              // A single write preserves all supported formats atomically.
-              if (Object.keys(original).length) clipboard.write(original);
-              else clipboard.clear();
-            } catch {
-              /* Delivery already occurred; restoration failure never triggers another paste. */
-            }
-          }
+          // Posted keys do not acknowledge consumption. Keep text available to slow targets
+          // and for manual recovery; never overwrite a later user copy on a timer.
           return { delivery: "dispatched" };
         }
         if (

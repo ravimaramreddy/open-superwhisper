@@ -365,3 +365,166 @@ test(
     );
   }
 );
+
+test("editing modes preserve exact ASR and pass fixed editing choices to both editors", async () => {
+  for (const profile of ["studio", "air"]) {
+    for (const editingMode of ["exact", "clean", "polished"]) {
+      const rawText = "use quarts i cant find it";
+      const edited = "Use Quartz. I cannot find it.";
+      let editedOnStudio = false;
+      const { instance } = fixture({
+        studio: {
+          transcribe: async () => rawText,
+          edit: async (args) => {
+            editedOnStudio = true;
+            assert.equal(args.editingMode, editingMode);
+            assert.equal(args.style, "email");
+            return edited;
+          },
+        },
+        air: {
+          process: async (args) => {
+            assert.equal(args.editingMode, editingMode);
+            assert.equal(args.cleanup, editingMode !== "exact");
+            assert.equal(args.style, "email");
+            return {
+              ...airResult,
+              rawText,
+              text: editingMode === "exact" ? rawText : edited,
+              cleanupStatus: editingMode === "exact" ? "off" : "applied",
+            };
+          },
+        },
+      });
+      const result = await instance.processWav({
+        ...request,
+        profile,
+        editingMode,
+        style: "email",
+        vocabulary: [{ word: "Quartz", aliases: ["quarts"] }],
+      });
+      assert.equal(result.rawText, rawText);
+      if (editingMode === "exact") {
+        assert.equal(result.text, rawText);
+        assert.equal(result.cleanupStatus, "off");
+        assert.equal(editedOnStudio, false);
+      }
+    }
+  }
+});
+
+test("resolved name search passes through both production cleanup paths; factual uncertainty stays guarded", async () => {
+  for (const profile of ["studio", "air"]) {
+    for (const [rawText, text, guarded] of [
+      [
+        "I don't recall the name of the app what's it called oh right Quartz is it working",
+        "Is Quartz working?",
+        false,
+      ],
+      [
+        "I don't remember whether Quartz worked last time I think it might have failed",
+        "Quartz worked last time.",
+        true,
+      ],
+      [
+        "I don't recall the name of the app what's it called oh right Quartz do not deploy it",
+        "Deploy Quartz.",
+        true,
+      ],
+    ]) {
+      const { instance } = fixture({
+        studio: { transcribe: async () => rawText, edit: async () => text },
+        air: { process: async () => ({ ...airResult, rawText, text }) },
+      });
+      const result = await instance.processWav({ ...request, profile });
+      assert.equal(result.text, guarded ? rawText : text);
+      assert.equal(Boolean(result.candidateText), guarded);
+    }
+  }
+});
+
+test("text-only retries obey the chosen profile and retain review protection", async () => {
+  for (const profile of ["studio", "air"]) {
+    const { instance, calls } = fixture({
+      studio: {
+        edit: async (args) => {
+          assert.equal(args.text, "send 15 copies");
+          assert.equal(args.editingMode, "clean");
+          assert.equal(args.style, "chat");
+          return "Send 50 copies.";
+        },
+      },
+      air: {
+        rewrite: async (args) => {
+          assert.equal(args.text, "send 15 copies");
+          assert.equal(args.editingMode, "clean");
+          assert.equal(args.style, "chat");
+          return { text: "Send 50 copies." };
+        },
+      },
+    });
+    const result = await instance.rewrite({
+      text: "send 15 copies",
+      profile,
+      editingMode: "clean",
+      style: "chat",
+    });
+    assert.equal(result.text, "send 15 copies");
+    assert.equal(result.candidateText, "Send 50 copies.");
+    assert.equal(result.actualProfile, profile);
+    assert.equal(result.cleanupStatus, "applied");
+    assert.equal(result.timings.asrMs, 0);
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("Auto text retry falls back only when Studio is unavailable", async () => {
+  for (const [code, fallsBack] of [
+    ["STUDIO_UNAVAILABLE", true],
+    ["INVALID_MODEL_OUTPUT", false],
+  ]) {
+    let localCalls = 0;
+    const { instance } = fixture({
+      studio: {
+        edit: async () => {
+          throw Object.assign(new Error("failed"), { code });
+        },
+      },
+      air: {
+        rewrite: async () => {
+          localCalls++;
+          return { text: "Edited." };
+        },
+      },
+    });
+    const retry = instance.rewrite({ text: "edited", profile: "auto" });
+    if (fallsBack) {
+      const result = await retry;
+      assert.equal(result.actualProfile, "air");
+      assert.match(result.fallbackReason, /unavailable/);
+    } else await assert.rejects(retry, { code });
+    assert.equal(localCalls, fallsBack ? 1 : 0);
+  }
+});
+
+test("exact text retry uses neither model nor vocabulary replacements", async () => {
+  const { instance, calls } = fixture();
+  const result = await instance.rewrite({
+    text: "use quarts",
+    editingMode: "exact",
+    vocabulary: [{ word: "Quartz", aliases: ["quarts"] }],
+  });
+  assert.equal(result.text, "use quarts");
+  assert.equal(result.cleanupStatus, "off");
+  assert.equal(result.actualProfile, undefined);
+  assert.deepEqual(calls, []);
+});
+
+test("invalid editing controls fail before any model request", async () => {
+  const { instance, calls } = fixture();
+  for (const options of [{ editingMode: "instructions" }, { style: "instructions" }]) {
+    await assert.rejects(instance.processWav({ ...request, ...options }), /Invalid/);
+    await assert.rejects(instance.rewrite({ text: "raw", ...options }), /Invalid/);
+  }
+  assert.deepEqual(calls, []);
+});

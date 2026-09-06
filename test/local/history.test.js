@@ -92,3 +92,34 @@ test("caller mutations cannot corrupt history", (t) => {
   read.rawText = "changed again";
   assert.equal(history.get("first").rawText, "literal original");
 });
+
+test("version snapshots are bounded, validated and detached from caller objects", (t) => {
+  const { history, file } = fixture(t);
+  history.save(row());
+  const previousVersion = {
+    text: "Before.",
+    cleanupStatus: "off",
+    edit: { source: "retry", profile: "air", elapsedMs: 1 },
+  };
+  history.update("first", { text: "After.", cleanupStatus: "applied", previousVersion });
+  previousVersion.text = "Mutated";
+  previousVersion.edit.profile = "studio";
+  assert.equal(history.get("first").previousVersion.text, "Before.");
+  assert.equal(new History(file).get("first").previousVersion.edit.profile, "air");
+  assert.throws(
+    () => history.update("first", { previousVersion: { ...previousVersion, previousVersion } }),
+    /Invalid transcript/
+  );
+  assert.throws(
+    () => history.update("first", { edit: { source: "retry", profile: "cloud", elapsedMs: 1 } }),
+    /Invalid transcript/
+  );
+  assert.throws(
+    () =>
+      history.update("first", {
+        previousVersion: { ...previousVersion, candidateText: "No reason" },
+      }),
+    /Invalid transcript/
+  );
+  assert.equal(history.get("first").text, "After.");
+});

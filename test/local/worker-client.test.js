@@ -143,6 +143,8 @@ test("Air sends per-request vocabulary and trained format selection to its worke
     assert.deepEqual(observed, {
       audioPath: "/audio/x",
       cleanup: true,
+      editingMode: "polished",
+      style: "neutral",
       vocabulary,
       format: "list",
     });
@@ -199,11 +201,13 @@ test("Studio editing keeps personal vocabulary and format in JSON data", async (
     transcript: 'Use "open super whisper".',
     vocabulary,
     format: "paragraphs",
+    editing_mode: "polished",
+    style: "neutral",
   });
   await client.edit({ text: "raw", vocabulary, rewrite: true, format: "list" });
-  assert.equal(body.system_prompt, "fixed rewrite");
+  assert.equal(body.system_prompt, "fixed cleanup");
   assert.equal(JSON.parse(body.input).format, "list");
-  assert.match(JSON.parse(body.input).editing_instruction, /without changing meaning/);
+  assert.equal(JSON.parse(body.input).editing_instruction, undefined);
   await client.shutdown();
 });
 
@@ -313,4 +317,86 @@ test("Studio caller can cancel while an SSH connection is still starting", async
   await assert.rejects(result, { name: "AbortError" });
   connected({});
   await client.shutdown();
+});
+
+test("Air retry has its own text-only protocol method and reuses the worker", async () => {
+  const observed = [];
+  const { client, children } = workerFixture((request, child) => {
+    observed.push(request);
+    queueMicrotask(() =>
+      child.send({ v: 1, id: request.id, ok: true, result: { text: "Edited." } })
+    );
+  });
+  try {
+    for (let i = 0; i < 2; i++)
+      await client.rewrite({
+        text: "edited",
+        editingMode: "clean",
+        style: "email",
+        format: "paragraphs",
+      });
+    assert.equal(children.length, 1);
+    for (const request of observed) {
+      assert.equal(request.method, "rewrite");
+      assert.deepEqual(request.params, {
+        text: "edited",
+        editingMode: "clean",
+        style: "email",
+        format: "paragraphs",
+        vocabulary: [],
+      });
+      assert.equal(request.params.audioPath, undefined);
+    }
+  } finally {
+    await client.shutdown();
+  }
+});
+
+test("Studio receives explicit mode and style instructions without mixing them into transcript data", async () => {
+  const prompts = require("../../local-runtime/prompts.json");
+  const client = new StudioClient({ prompts });
+  client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
+  client.ensureEditor = async () => {};
+  let observed;
+  client.json = async (_url, options) => {
+    observed = JSON.parse(options.body);
+    return { output: [{ type: "message", content: "Edited." }] };
+  };
+  await client.edit({ text: "original", editingMode: "clean", style: "email", rewrite: true });
+  const input = JSON.parse(observed.input);
+  assert.equal(input.editing_mode, "clean");
+  assert.equal(input.style, "email");
+  assert.equal(input.transcript, "original");
+  assert.equal(input.editing_instruction, undefined);
+  assert.match(observed.system_prompt, /preserving sentence order/);
+  assert.match(observed.system_prompt, /Never invent a greeting/);
+  assert.match(observed.system_prompt, /Do not condense complete thoughts/);
+  await client.shutdown();
+});
+
+test("Studio unavailable classification excludes invalid model output", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "osw-output-"));
+  const audioPath = path.join(directory, "fixture.wav");
+  await fs.writeFile(audioPath, "fixture");
+  const client = new StudioClient({ prompts: {} });
+  client.connect = async () => ({ asr: "http://127.0.0.1:8766" });
+  client.json = async () => ({ text: null });
+  try {
+    await assert.rejects(client.transcribe({ audioPath }), (error) => {
+      assert.match(error.message, /invalid transcript/);
+      assert.notEqual(error.code, "STUDIO_UNAVAILABLE");
+      return true;
+    });
+  } finally {
+    await client.shutdown();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+  const offline = new StudioClient({
+    prompts: {},
+    fetchImpl: async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    },
+  });
+  await assert.rejects(offline.json("http://127.0.0.1:1234"), { code: "STUDIO_UNAVAILABLE" });
+  await offline.shutdown();
 });

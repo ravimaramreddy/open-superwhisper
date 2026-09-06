@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld(
     cancel: (requestId) => ipcRenderer.invoke("local:cancel", requestId),
     copyTranscript: (id, source) => ipcRenderer.invoke("local:copy-transcript", id, source),
     rewriteTranscript: (id) => ipcRenderer.invoke("local:rewrite-transcript", id),
+    undoTranscript: (id) => ipcRenderer.invoke("local:undo-transcript", id),
+    acceptSuggestion: (id) => ipcRenderer.invoke("local:accept-suggestion", id),
     deleteTranscript: (id) => ipcRenderer.invoke("local:delete-transcript", id),
     hideWindow: () => ipcRenderer.invoke("local:hide-window"),
     onState: (callback) => subscribe("local:state", callback),
