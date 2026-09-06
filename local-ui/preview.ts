@@ -1,7 +1,9 @@
 import type { AppState, LocalWhisprAPI, Transcript, TextVersion } from "../desktop/contracts";
 
 /** Imported only by an explicitly requested Vite development preview. */
-export function createPreviewAPI(): LocalWhisprAPI {
+export function createPreviewAPI({
+  geminiStatus = "ready",
+}: { geminiStatus?: Exclude<AppState["gemini"], "unknown"> } = {}): LocalWhisprAPI {
   const sample: Transcript = {
     id: "preview-sample",
     createdAt: new Date().toISOString(),
@@ -43,7 +45,18 @@ export function createPreviewAPI(): LocalWhisprAPI {
     edit: { source: "dictation", profile: "air", elapsedMs: 770 },
     targetApp: { bundleId: "com.apple.MobileSMS", name: "Messages" },
   };
-  for (const item of [sample, fallbackSample]) {
+  const geminiSample: Transcript = {
+    ...sample,
+    id: "preview-gemini",
+    rawText: "keep the blue panel but do not change the sidebar",
+    text: "Keep the blue panel, but do not change the sidebar.",
+    actualProfile: "gemini",
+    durationMs: 5300,
+    timings: { asrMs: 0, cleanupMs: 0, geminiMs: 1240, totalMs: 1240 },
+    edit: { source: "dictation", profile: "gemini", elapsedMs: 0 },
+    targetApp: { bundleId: "com.apple.Notes", name: "Notes" },
+  };
+  for (const item of [sample, fallbackSample, geminiSample]) {
     item.previousVersion = {
       text: item.rawText,
       cleanupStatus: "off",
@@ -79,9 +92,10 @@ export function createPreviewAPI(): LocalWhisprAPI {
     permissions: { microphone: "not-determined", accessibility: false },
     localReady: false,
     studio: "ready",
+    gemini: "unknown",
     phase: "idle",
     progress: "",
-    history: [guardedSample, sample, fallbackSample],
+    history: [guardedSample, sample, fallbackSample, geminiSample],
     latest: guardedSample,
     error: null,
   };
@@ -138,7 +152,10 @@ export function createPreviewAPI(): LocalWhisprAPI {
       state = { ...state, localReady: true };
       return emit();
     },
-    checkConnections: async () => emit(),
+    checkConnections: async () => {
+      if (state.settings.profile === "gemini") state = { ...state, gemini: geminiStatus };
+      return emit();
+    },
     beginRecording: async () => {
       throw new Error("Recording is disabled in the design preview.");
     },
@@ -168,7 +185,9 @@ export function createPreviewAPI(): LocalWhisprAPI {
             ? "Please keep fifteen seats for the review, not fifty."
             : item.id === "preview-fallback"
               ? fallbackSample.text
-              : sample.text;
+              : item.id === "preview-gemini"
+                ? geminiSample.text
+                : sample.text;
         if (options.editingMode === "polished" && item.id === "preview-sample") {
           text =
             "Could we move the review to Thursday afternoon? Maya needs a little more time with the draft.";

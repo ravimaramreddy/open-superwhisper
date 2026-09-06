@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   Circle,
+  Cloud,
   Copy,
   FolderOpen,
   History,
@@ -30,6 +31,7 @@ import { shortcutFromEvent } from "./shortcut";
 import { TextChanges } from "./TextChanges";
 import { ModePicker, WritingOptions } from "./EditingControls";
 import { AppRules } from "./AppRules";
+import { processingTimings } from "./processing";
 
 const initialCapture: CaptureView = { phase: "idle", level: 0, elapsedMs: 0 };
 const shortcutLabel = (value: string) =>
@@ -361,8 +363,19 @@ export default function App({ preview = false }: { preview?: boolean }) {
               ? "processing"
               : "ready";
   const visibleError = error || state.error;
-  const connectionLabel =
-    state.studio === "ready"
+  const geminiSelected = state.settings.profile === "gemini";
+  const connectionState = geminiSelected ? state.gemini : state.studio;
+  const connectionLabel = geminiSelected
+    ? t(
+        state.gemini === "ready"
+          ? "geminiReady"
+          : state.gemini === "offline"
+            ? "geminiOffline"
+            : state.gemini === "unconfigured"
+              ? "geminiUnconfigured"
+              : "geminiChecking"
+      )
+    : state.studio === "ready"
       ? t("studioReady")
       : state.studio === "offline"
         ? t("studioOffline")
@@ -371,7 +384,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
   function routePicker() {
     return (
       <div className="segmented" role="group" aria-label={t("routeLabel")}>
-        {(["auto", "studio", "air"] as Profile[]).map((profile) => (
+        {(["auto", "studio", "air", "gemini"] as Profile[]).map((profile) => (
           <button
             key={profile}
             aria-pressed={state!.settings.profile === profile}
@@ -383,6 +396,8 @@ export default function App({ preview = false }: { preview?: boolean }) {
               <AudioLines size={14} />
             ) : profile === "studio" ? (
               <Monitor size={14} />
+            ) : profile === "gemini" ? (
+              <Cloud size={14} />
             ) : (
               <Laptop size={14} />
             )}
@@ -423,6 +438,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
     const rewriteBusy = action === `rewrite-${item.id}`;
     const guarded = !!item.candidateText && !!item.reviewReasons?.length;
     const editedLater = item.edit && item.edit.source !== "dictation";
+    const geminiOrigin = item.actualProfile === "gemini";
     return (
       <article className={`transcript-card ${latest ? "latest-card" : ""}`} key={item.id}>
         <div className="transcript-meta">
@@ -434,7 +450,13 @@ export default function App({ preview = false }: { preview?: boolean }) {
                 )}
           </span>
           <span className="meta-route">
-            {item.actualProfile === "studio" ? <Monitor size={12} /> : <Laptop size={12} />}
+            {geminiOrigin ? (
+              <Cloud size={12} />
+            ) : item.actualProfile === "studio" ? (
+              <Monitor size={12} />
+            ) : (
+              <Laptop size={12} />
+            )}
             {t(item.actualProfile)}
             <span className="meta-dot">·</span>
             {timeLabel(item.durationMs)}
@@ -446,7 +468,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
         ) : (
           <div className="transcript-columns">
             <section>
-              <h3>{t("original")}</h3>
+              <h3>{t(geminiOrigin ? "generatedTranscript" : "original")}</h3>
               <p>{item.rawText || t("originalEmpty")}</p>
             </section>
             <section>
@@ -455,7 +477,12 @@ export default function App({ preview = false }: { preview?: boolean }) {
             </section>
           </div>
         )}
-        <TextChanges before={item.rawText} after={item.text} label={t("changesFromOriginal")} />
+        {geminiOrigin && <p className="history-action-note">{t("geminiTranscriptDetail")}</p>}
+        <TextChanges
+          before={item.rawText}
+          after={item.text}
+          label={t(geminiOrigin ? "changesFromGenerated" : "changesFromOriginal")}
+        />
         <div className="transcript-notes">
           <span>
             {t(
@@ -554,18 +581,12 @@ export default function App({ preview = false }: { preview?: boolean }) {
           <summary>{t("processingDetails")}</summary>
           <p>{t("originalRoute", { machine: t(item.actualProfile) })}</p>
           <dl className="timing-list">
-            <div>
-              <dt>{t("speechTiming")}</dt>
-              <dd>{secondsLabel(item.timings.asrMs)}</dd>
-            </div>
-            <div>
-              <dt>{t("cleanupTiming")}</dt>
-              <dd>{secondsLabel(item.timings.cleanupMs)}</dd>
-            </div>
-            <div>
-              <dt>{t("totalTiming")}</dt>
-              <dd>{secondsLabel(item.timings.totalMs)}</dd>
-            </div>
+            {processingTimings(item).map(({ label, ms }) => (
+              <div key={label}>
+                <dt>{t(label)}</dt>
+                <dd>{secondsLabel(ms)}</dd>
+              </div>
+            ))}
           </dl>
           {item.fallbackReason && (
             <p className="fallback-detail">
@@ -597,6 +618,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
             {item.audioWarning}
           </p>
         )}
+        {geminiSelected && <p className="history-action-note">{t("geminiRetryDetail")}</p>}
         <div className="transcript-actions">
           <button
             className="text-button"
@@ -610,7 +632,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
             }
           >
             <Copy size={13} />
-            {t("copyOriginal")}
+            {t(geminiOrigin ? "copyGeneratedTranscript" : "copyOriginal")}
           </button>
           <button
             className="text-button"
@@ -637,7 +659,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
           </button>
           <button
             className="text-button rewrite-button"
-            title={t("rewriteDescription")}
+            title={t(geminiSelected ? "rewriteLocallyDescription" : "rewriteDescription")}
             disabled={locked}
             onClick={() =>
               void perform(
@@ -648,7 +670,15 @@ export default function App({ preview = false }: { preview?: boolean }) {
             }
           >
             {rewriteBusy ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}
-            {t(rewriteBusy ? "rewriting" : "rewrite")}
+            {t(
+              rewriteBusy
+                ? "rewriting"
+                : geminiSelected
+                  ? "rewriteLocally"
+                  : geminiOrigin
+                    ? "rewriteGenerated"
+                    : "rewrite"
+            )}
           </button>
           {item.previousVersion && (
             <button
@@ -753,7 +783,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
         <div className="sidebar-bottom">
           <div className="status-line">
             <span
-              className={`status-dot ${state.studio === "ready" ? "good" : state.studio === "unknown" ? "waiting" : ""}`}
+              className={`status-dot ${connectionState === "ready" ? "good" : connectionState === "unknown" ? "waiting" : ""}`}
             />
             <span>{connectionLabel}</span>
           </div>
@@ -800,11 +830,9 @@ export default function App({ preview = false }: { preview?: boolean }) {
                   {t(
                     mainPhase === "listening"
                       ? "listeningTitle"
-                      : state.settings.profile === "air"
-                        ? "air"
-                        : state.settings.profile === "studio"
-                          ? "studio"
-                          : "automaticDetail"
+                      : state.settings.profile === "auto"
+                        ? "automaticDetail"
+                        : state.settings.profile
                   )}
                 </div>
                 <h1>{t(`${mainPhase}Title`)}</h1>
@@ -879,8 +907,11 @@ export default function App({ preview = false }: { preview?: boolean }) {
                 />
               </div>
               <p className="mode-detail">{t(`modeDetail_${state.settings.editingMode}`)}</p>
+              {geminiSelected && <p className="model-mode-detail">{t("geminiDetail")}</p>}
               {state.settings.editingMode !== "exact" && (
-                <p className="model-mode-detail">{t("compactEditorDetail")}</p>
+                <p className="model-mode-detail">
+                  {t(geminiSelected ? "geminiEditorDetail" : "compactEditorDetail")}
+                </p>
               )}
               {!!state.settings.appRules?.length && (
                 <p className="model-mode-detail">{t("appRulesActive")}</p>
@@ -1032,7 +1063,9 @@ export default function App({ preview = false }: { preview?: boolean }) {
                       onChange={(patch) => void save(patch)}
                     />
                     <p className="setting-explanation">
-                      {t("compactEditorDetail")} {t("formatDetail")}
+                      {geminiSelected
+                        ? t("geminiEditorDetail")
+                        : `${t("compactEditorDetail")} ${t("formatDetail")}`}
                     </p>
                   </div>
                 </div>

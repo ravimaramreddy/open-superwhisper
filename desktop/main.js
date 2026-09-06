@@ -18,6 +18,7 @@ const { Controller } = require("./controller");
 const { History } = require("./history");
 const { createNative } = require("./native");
 const { createInference } = require("./inference");
+const { loadMachineConfig } = require("./machine-config");
 
 app.setName("OpenSuperwhisper");
 app.setPath("userData", path.join(app.getPath("appData"), "OpenSuperwhisper"));
@@ -100,16 +101,6 @@ function publish(state) {
   }
 }
 
-function loadMachineConfig(userData) {
-  const file = path.join(userData, "machine.json");
-  if (!fs.existsSync(file)) return {};
-  if (fs.statSync(file).size > 64 * 1024) throw new Error("machine.json is too large");
-  const config = JSON.parse(fs.readFileSync(file, "utf8"));
-  if (!config || typeof config !== "object" || Array.isArray(config))
-    throw new Error("machine.json must contain an object");
-  return config;
-}
-
 function rendererLocation() {
   const development = process.env.LOCAL_WHISPR_DEV_URL || process.env.VITE_DEV_SERVER_URL;
   if (!app.isPackaged && development) {
@@ -143,10 +134,11 @@ async function start() {
       : path.join(app.getAppPath(), "resources", "bin", "macos-local-paste.node"),
     clipboard,
   });
+  const machine = loadMachineConfig(userData);
   inference = createInference({
     userData,
     resourcesPath: process.resourcesPath,
-    config: loadMachineConfig(userData),
+    config: machine.config,
     onProgress: (message) => controller?.progress(message),
   });
   controller = new Controller({
@@ -182,6 +174,8 @@ async function start() {
   } catch (error) {
     controller.state.error = error.message;
   }
+  if (machine.warning)
+    controller.state.error = [controller.state.error, machine.warning].filter(Boolean).join(" ");
 
   const location = rendererLocation();
   window = new BrowserWindow({

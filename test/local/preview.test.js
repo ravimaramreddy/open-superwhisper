@@ -2,6 +2,56 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createPreviewAPI } = require("../../local-ui/preview.ts");
 
+test("preview Gemini connection checks are explicit and local preparation stays available", async () => {
+  for (const geminiStatus of ["ready", "offline", "unconfigured"]) {
+    const api = createPreviewAPI({ geminiStatus });
+    assert.equal((await api.getState()).settings.profile, "auto");
+    assert.equal((await api.checkConnections()).gemini, "unknown");
+    await api.updateSettings({ profile: "gemini" });
+    assert.equal((await api.checkConnections()).gemini, geminiStatus);
+    assert.equal((await api.prepareLocal()).localReady, true);
+    assert.equal((await api.getState()).settings.profile, "gemini");
+  }
+});
+
+test("preview Gemini transcript retries locally without replacing its origin or timing", async () => {
+  const api = createPreviewAPI();
+  const original = (await api.getState()).history.find((item) => item.id === "preview-gemini");
+  assert.ok(original);
+  await api.updateSettings({ profile: "gemini" });
+  const retried = await api.rewriteTranscript(original.id);
+  assert.equal(retried.actualProfile, "gemini");
+  assert.equal(retried.edit.profile, "studio");
+  assert.equal(retried.rawText, original.rawText);
+  assert.deepEqual(retried.timings, original.timings);
+  assert.equal(retried.delivery, original.delivery);
+  assert.match(retried.text, /blue panel/);
+  assert.match(retried.text, /not change the sidebar/);
+});
+
+test("processing details show combined Gemini time and separate fallback stages honestly", async () => {
+  const { processingTimings } = require("../../local-ui/processing.ts");
+  const api = createPreviewAPI();
+  const item = (await api.getState()).history.find((row) => row.id === "preview-gemini");
+  assert.deepEqual(processingTimings(item), [
+    { label: "geminiTiming", ms: item.timings.geminiMs },
+    { label: "totalTiming", ms: item.timings.totalMs },
+  ]);
+  assert.deepEqual(
+    processingTimings({
+      ...item,
+      actualProfile: "air",
+      timings: { geminiMs: 900, asrMs: 100, cleanupMs: 200, totalMs: 1200 },
+    }),
+    [
+      { label: "geminiAttemptTiming", ms: 900 },
+      { label: "speechTiming", ms: 100 },
+      { label: "cleanupTiming", ms: 200 },
+      { label: "totalTiming", ms: 1200 },
+    ]
+  );
+});
+
 test("preview review acceptance and one-level undo preserve original and delivery history", async () => {
   const api = createPreviewAPI();
   const original = (await api.getState()).history.find((item) => item.id === "preview-review");

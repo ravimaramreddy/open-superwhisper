@@ -84,6 +84,110 @@ async function submit(controller, audio = wav()) {
   return controller.transcribe({ requestId: session.requestId, audio, durationMs: 100 });
 }
 
+test("Gemini preferences persist without accepting private connection configuration", async (t) => {
+  const { controller, directory } = harness(t);
+  await controller.updateSettings({ profile: "gemini" });
+  const stored = JSON.parse(fs.readFileSync(path.join(directory, "settings.json")));
+  assert.equal(normalizeSettings(stored).profile, "gemini");
+  assert.equal(controller.getState().settings.profile, "gemini");
+  for (const patch of [
+    { projectId: "example-project" },
+    { gemini: {} },
+    { accessToken: "example" },
+  ])
+    await assert.rejects(controller.updateSettings(patch), /Unknown setting/);
+});
+
+test("connection checks only authenticate Gemini when explicitly selected", async (t) => {
+  let checks = 0;
+  const { controller } = harness(t, {
+    inference: {
+      checkGemini: async () => {
+        checks++;
+        return "unconfigured";
+      },
+    },
+  });
+  await controller.checkConnections();
+  assert.equal(checks, 0);
+  assert.equal(controller.getState().gemini, "unknown");
+  await controller.updateSettings({ profile: "gemini" });
+  await controller.checkConnections();
+  assert.equal(checks, 1);
+  assert.equal(controller.getState().gemini, "unconfigured");
+  assert.ok(!JSON.stringify(controller.getState()).includes("projectId"));
+});
+
+test("Gemini duplicate submissions keep one delivery, history and retained audio pair", async (t) => {
+  const work = deferred();
+  let modelCalls = 0;
+  const { controller, history, calls, directory } = harness(t, {
+    inference: {
+      processWav: async () => {
+        modelCalls++;
+        return work.promise;
+      },
+    },
+  });
+  await controller.updateSettings({ profile: "gemini", retainAudio: true });
+  const { requestId } = await controller.beginRecording();
+  const input = { requestId, audio: wav(), durationMs: 100 };
+  const first = controller.transcribe(input);
+  const duplicate = controller.transcribe(input);
+  work.resolve({
+    ...modelResult(),
+    actualProfile: "gemini",
+    timings: { asrMs: 0, cleanupMs: 0, geminiMs: 2500, totalMs: 2600 },
+  });
+  const [result] = await Promise.all([first, duplicate]);
+  assert.equal(modelCalls, 1);
+  assert.equal(calls.delivery.length, 1);
+  assert.equal(history.list().length, 1);
+  assert.equal(result.actualProfile, "gemini");
+  assert.equal(result.edit.profile, "gemini");
+  assert.equal(result.edit.elapsedMs, 2500);
+  assert.equal(controller.getState().gemini, "ready");
+  assert.equal(controller.getState().studio, "unknown");
+  const saved = JSON.parse(
+    fs.readFileSync(path.join(directory, "retained-audio", `${requestId}.json`))
+  );
+  assert.equal(saved.actualProfile, "gemini");
+  assert.equal(saved.settings.profile, "gemini");
+  assert.equal(saved.timings.geminiMs, 2500);
+  assert.equal(saved.rawText, modelResult().rawText);
+  assert.equal(saved.text, result.text);
+  assert.equal(saved.projectId, undefined);
+  assert.equal(saved.account, undefined);
+  assert.equal(saved.accessToken, undefined);
+});
+
+test("cancelled Gemini result cannot be delivered or kept in the archive", async (t) => {
+  const work = deferred();
+  const began = deferred();
+  const { controller, calls, history, directory } = harness(t, {
+    inference: {
+      processWav: async () => {
+        began.resolve();
+        return work.promise;
+      },
+    },
+  });
+  await controller.updateSettings({ profile: "gemini", retainAudio: true });
+  const { requestId } = await controller.beginRecording();
+  const pending = controller.transcribe({ requestId, audio: wav(), durationMs: 100 });
+  await began.promise;
+  await controller.cancel(requestId);
+  work.resolve({
+    ...modelResult(),
+    actualProfile: "gemini",
+    timings: { asrMs: 0, cleanupMs: 0, geminiMs: 2500, totalMs: 2600 },
+  });
+  assert.equal(await pending, null);
+  assert.equal(calls.delivery.length, 0);
+  assert.equal(history.list().length, 0);
+  assert.equal(fs.existsSync(path.join(directory, "retained-audio", `${requestId}.wav`)), false);
+});
+
 test("audio retention is opt-in and history off prevents retention", async (t) => {
   const { controller, directory } = harness(t, {
     native: { deliver: async () => ({ delivery: "dispatched" }) },
