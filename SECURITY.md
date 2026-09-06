@@ -27,10 +27,18 @@ There is no guaranteed response time or supported-release schedule.
 - **Network access:** inference uses your Macs, with no cloud account, API-key
   vault or upstream account services in the active app. Preparing this Mac
   downloads public runtime packages and pinned, hash-verified model files.
-- **Local data:** settings, vocabulary, history, runtime files and temporary
-  audio live in `~/Library/Application Support/OpenSuperwhisper`. Saved text is
+- **Local data:** settings, vocabulary, history, runtime files, temporary audio
+  and optional saved recordings live in `~/Library/Application Support/OpenSuperwhisper`. Saved text is
   local JSON, without application-level encryption. History retains the latest
   100 transcripts; disabling history does not delete existing entries.
+- **Optional audio retention:** Keep audio for testing is off by default and
+  requires History. It saves local WAV/JSON pairs with initial transcript,
+  settings and timing details, using private file permissions rather than
+  application-level encryption. Turning it off stops future saves; automatic
+  History rollover retains older archive files. Saving stops at 1 GiB or 2,000
+  clips without evicting older files. Explicit History deletion and cancellation
+  remove the associated pair; removal failures are reported and can leave files
+  for manual cleanup through Open saved recordings.
 - **Audio and delivery:** microphone access records up to two minutes. Temporary
   audio is removed after processing or cancellation, with abandoned app-owned
   recordings cleaned on launch; removal failures can leave files behind.

@@ -13,6 +13,7 @@ export function createPreviewAPI(): LocalWhisprAPI {
     durationMs: 12400,
     timings: { asrMs: 600, cleanupMs: 380, totalMs: 980 },
     delivery: "clipboard-only",
+    audio: { fileName: "preview-sample.wav", bytes: 396_844 },
     editingMode: "polished",
     style: "neutral",
     format: "prose",
@@ -72,6 +73,7 @@ export function createPreviewAPI(): LocalWhisprAPI {
       microphoneId: "default",
       hotkey: "CommandOrControl+Shift+Space",
       historyEnabled: true,
+      retainAudio: false,
       launchAtLogin: false,
     },
     permissions: { microphone: "not-determined", accessibility: false },
@@ -121,6 +123,7 @@ export function createPreviewAPI(): LocalWhisprAPI {
     updateSettings: async (patch) => {
       state = { ...state, settings: { ...state.settings, ...patch } };
       if (patch.editingMode) state.settings.cleanup = patch.editingMode !== "exact";
+      if (!state.settings.historyEnabled) state.settings.retainAudio = false;
       return emit();
     },
     requestPermission: async (kind) => {
@@ -237,6 +240,8 @@ export function createPreviewAPI(): LocalWhisprAPI {
       return emit();
     },
     hideWindow: async () => {},
+    openAudioFolder: async () => {},
+    showRecording: async () => {},
     onState: (callback) => {
       listeners.add(callback);
       return () => {

@@ -261,6 +261,11 @@ async function start() {
     "undo-transcript": (id) => controller.undoTranscript(id),
     "accept-suggestion": (id) => controller.acceptSuggestion(id),
     "delete-transcript": (id) => controller.deleteTranscript(id),
+    "open-audio-folder": async () => {
+      const error = await shell.openPath(controller.audioDirectory());
+      if (error) throw new Error("The recordings folder could not be opened");
+    },
+    "show-recording": (id) => shell.showItemInFolder(controller.recordingFile(id)),
     "hide-window": () => {
       window.hide();
     },

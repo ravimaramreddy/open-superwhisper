@@ -107,8 +107,9 @@ it a five-minute idle lifetime, and unloads only its own instance when closing.
   also applies; if full, copy the latest result and remove older entries. The
   original stays unchanged when you edit. Turn history off to avoid saving
   new transcripts; existing history remains until you delete it.
-- Temporary audio is removed when processing completes or is cancelled.
+- Temporary processing audio is removed when processing completes or is cancelled.
   App-owned recordings left by a crash are removed on the next launch.
+  Audio is kept beyond processing only if you enable the testing archive below.
   Raw text is saved before automatic delivery when history is enabled.
 - Dictated text stays on the clipboard after paste is sent, so a busy app can
   consume it later. The previous clipboard is not restored on a timer. "Initial
@@ -121,6 +122,30 @@ it a five-minute idle lifetime, and unloads only its own instance when closing.
 - App data lives in `~/Library/Application Support/OpenSuperwhisper` and is
   separate from OpenWhispr. Voice processing uses your Macs; installation obtains
   public packages and model files from their publishers.
+
+### Save audio for testing
+
+**Settings → Keep audio for testing** is off by default and requires dictation
+history. When enabled, future submitted, nonsilent dictations can be retained on
+this Mac as a WAV recording and a matching JSON file. The JSON preserves the
+initial raw and edited transcript, effective settings and processing timings for
+later comparison. Later History edits do not replace that initial snapshot.
+
+- The archive is private app data under
+  `~/Library/Application Support/OpenSuperwhisper`, outside the repository.
+  **Open saved recordings** opens it even when saving is off. **Show recording**
+  reveals the saved clip for a History entry.
+- The archive is independent of History's 100-entry limit: automatic History
+  rollover leaves older audio and transcript files available.
+- Turning audio saving off stops future saves; existing files remain. Turning
+  History off also disables future audio saving.
+- Saving stops at **1 GiB or 2,000 clips**, with a visible warning. No older
+  recordings are automatically deleted to make space.
+- **Delete dictation + recording** in History removes that entry and its linked
+  WAV/JSON pair. Cancelling a dictation also removes its pair. Older archived
+  pairs that have left History can be managed through **Open saved recordings**.
+- A failed archive save shows a warning but does not prevent ordinary dictation
+  or paste. Keep only recordings you want available for testing.
 
 ## Development
 

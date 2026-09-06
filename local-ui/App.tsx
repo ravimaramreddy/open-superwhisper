@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Circle,
   Copy,
+  FolderOpen,
   History,
   Laptop,
   LoaderCircle,
@@ -391,7 +392,13 @@ export default function App({ preview = false }: { preview?: boolean }) {
       </div>
     );
   }
-  function switchControl(label: string, detail: string, checked: boolean, onChange: () => void) {
+  function switchControl(
+    label: string,
+    detail: string,
+    checked: boolean,
+    onChange: () => void,
+    disabled = false
+  ) {
     return (
       <div className="setting-row">
         <div>
@@ -404,7 +411,7 @@ export default function App({ preview = false }: { preview?: boolean }) {
           aria-label={label}
           aria-checked={checked}
           className={`switch ${checked ? "on" : ""}`}
-          disabled={locked}
+          disabled={locked || disabled}
           onClick={onChange}
         >
           <span />
@@ -585,6 +592,11 @@ export default function App({ preview = false }: { preview?: boolean }) {
           )}
         </details>
         {item.warning && <p className="item-warning">{item.warning}</p>}
+        {item.audioWarning && (
+          <p className="item-warning" role="alert">
+            {item.audioWarning}
+          </p>
+        )}
         <div className="transcript-actions">
           <button
             className="text-button"
@@ -655,21 +667,33 @@ export default function App({ preview = false }: { preview?: boolean }) {
               {t("undo")}
             </button>
           )}
+          {item.audio && (
+            <button
+              className="text-button"
+              disabled={locked}
+              onClick={() => void perform(`recording-${item.id}`, () => api.showRecording(item.id))}
+            >
+              <FolderOpen size={13} />
+              {t("showRecording")}
+            </button>
+          )}
           {!latest && (
             <>
               <button
-                className="icon-button delete-button"
-                aria-label={t("delete")}
+                className={`${item.audio ? "text-button" : "icon-button"} delete-button`}
+                aria-label={t(item.audio ? "deleteWithAudio" : "delete")}
+                title={t(item.audio ? "deleteWithAudioDetail" : "delete")}
                 disabled={locked}
                 onClick={() =>
                   void perform(
                     `delete-${item.id}`,
                     () => api.deleteTranscript(item.id),
-                    t("removed")
+                    t(item.audio ? "removedWithAudio" : "removed")
                   )
                 }
               >
                 <Trash2 size={14} />
+                {item.audio && t("deleteWithAudio")}
               </button>
             </>
           )}
@@ -860,6 +884,9 @@ export default function App({ preview = false }: { preview?: boolean }) {
               )}
               {!!state.settings.appRules?.length && (
                 <p className="model-mode-detail">{t("appRulesActive")}</p>
+              )}
+              {state.settings.retainAudio && (
+                <p className="model-mode-detail">{t("audioSavingOn")}</p>
               )}
               <p className="recording-limit">
                 {state.phase === "setup" && state.progress ? state.progress : t("durationLimit")}
@@ -1183,6 +1210,31 @@ export default function App({ preview = false }: { preview?: boolean }) {
                     state.settings.historyEnabled,
                     () => void save({ historyEnabled: !state.settings.historyEnabled })
                   )}
+                  {switchControl(
+                    t("retainAudio"),
+                    t("retainAudioDetail"),
+                    state.settings.retainAudio,
+                    () => void save({ retainAudio: !state.settings.retainAudio }),
+                    !state.settings.historyEnabled
+                  )}
+                  <div className="setting-row">
+                    <div>
+                      <span className="setting-label">{t("savedRecordings")}</span>
+                      <p>
+                        {t(
+                          state.settings.historyEnabled ? "audioArchiveDetail" : "audioNeedsHistory"
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      className="small-button"
+                      disabled={action !== null}
+                      onClick={() => void perform("audio-folder", () => api.openAudioFolder())}
+                    >
+                      <FolderOpen size={13} />
+                      {t("openAudioFolder")}
+                    </button>
+                  </div>
                 </div>
               </section>
               <p className="privacy-note">
