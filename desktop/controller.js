@@ -521,7 +521,7 @@ class Controller {
       if (archiveCleanup) {
         // Retry only entries whose identities were captured by this failed save.
         // In particular, cancellation must not abandon a partially published WAV.
-        if (archiveCleanup()) audioWarning = `Audio was not saved: ${archiveSaveError}`;
+        if (archiveCleanup()) audioWarning = "Audio was not saved. Partial files were removed.";
       }
       if (savedAudio) {
         try {

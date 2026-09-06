@@ -253,6 +253,8 @@ test("cancellation retries incomplete archive rollback without abandoning audio"
   gate.resolve();
   assert.equal(await pending, null);
   assert.deepEqual(fs.readdirSync(controller.audioDirectory()), []);
+  assert.match(controller.getState().error, /Partial files were removed/);
+  assert.doesNotMatch(controller.getState().error, /may remain/i);
 });
 
 test("persistent rollback failure reports possible remaining audio while delivering text", async (t) => {
