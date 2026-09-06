@@ -40,12 +40,25 @@ def vocabulary_words(entries):
     return words
 
 
-def s1_controls(format):
+def s1_controls(format, style="neutral"):
     # S1 is trained on these exact controls, not arbitrary editing instructions.
     # Its prose option already permits paragraphs; lists requires an enumeration.
-    if format == "list":
-        return "[Styling: semi-formal] [Structure: lists] [Context: general]\n"
-    return S1_CONTROLS
+    structure = "lists" if format == "list" else "prose"
+    context = "email" if style == "email" else "general"
+    # The model has no editing-strength control. Both cleaned modes use normal
+    # English; casual controls deliberately omit standard capitalization.
+    return f"[Styling: semi-formal] [Structure: {structure}] [Context: {context}]\n"
+
+
+def editing_mode(params):
+    mode = params.get(
+        "editingMode", "polished" if params.get("cleanup", True) else "exact"
+    )
+    if mode not in ("exact", "clean", "polished"):
+        raise ValueError("Invalid editing mode")
+    if params.get("style", "neutral") not in ("neutral", "chat", "email"):
+        raise ValueError("Invalid text style")
+    return mode
 
 
 def validate_wav(filename, audio_root):
@@ -82,11 +95,16 @@ class Engine:
             self.asr = load(self.qwen_path, strict=True)
             mx.synchronize()
 
-    def clean(self, text, format="prose"):
+    def clean(self, text, format="prose", style="neutral"):
         if not text.strip():
             return ""
         from mlx_lm import load, stream_generate
         from mlx_lm.sample_utils import make_sampler
+
+        if self.mx is None:
+            import mlx.core as mx
+
+            self.mx = mx
 
         if self.editor is None:
             self.report("Loading local correction — S1-mini by Superwhisper")
@@ -95,7 +113,7 @@ class Engine:
         prompt = self.tokenizer.apply_chat_template(
             [
                 {"role": "system", "content": S1_SYSTEM},
-                {"role": "user", "content": s1_controls(format) + text},
+                {"role": "user", "content": s1_controls(format, style) + text},
             ],
             tokenize=False,
             add_generation_prompt=True,
@@ -121,6 +139,7 @@ class Engine:
         return cleaned
 
     def process(self, params):
+        mode = editing_mode(params)
         audio = validate_wav(params["audioPath"], self.audio_root)
         words = vocabulary_words(params.get("vocabulary", []))
         started = time.perf_counter()
@@ -142,9 +161,13 @@ class Engine:
             )
         after_asr = time.perf_counter()
         text, status, warning = raw, "off", None
-        if params.get("cleanup"):
+        if mode != "exact":
             try:
-                text = self.clean(raw, format=params.get("format", "prose"))
+                text = self.clean(
+                    raw,
+                    format=params.get("format", "prose"),
+                    style=params.get("style", "neutral"),
+                )
                 status = "applied"
             except Exception as error:  # noqa: BLE001 — every correction failure must preserve the raw transcript.
                 status, warning = "failed", str(error)
@@ -163,6 +186,29 @@ class Engine:
         if warning:
             reply["warning"] = warning
         return reply
+
+    def rewrite(self, params):
+        mode = editing_mode(params)
+        text = params.get("text")
+        if not isinstance(text, str) or len(text) > 32768:
+            raise ValueError("Invalid or oversized transcript")
+        started = time.perf_counter()
+        cleaned = (
+            text
+            if mode == "exact"
+            else self.clean(
+                text,
+                format=params.get("format", "prose"),
+                style=params.get("style", "neutral"),
+            )
+        )
+        elapsed = (time.perf_counter() - started) * 1000
+        return {
+            "text": cleaned,
+            "actualProfile": "air",
+            "cleanupStatus": "off" if mode == "exact" else "applied",
+            "timings": {"asrMs": 0, "cleanupMs": elapsed, "totalMs": elapsed},
+        }
 
 
 def serve(engine, input_fd, write, idle_seconds):
@@ -196,9 +242,14 @@ def serve(engine, input_fd, write, idle_seconds):
                     if request.get("method") == "shutdown":
                         write({"v": 1, "id": request["id"], "ok": True, "result": None})
                         return
-                    if request.get("method") != "process":
+                    if request.get("method") not in ("process", "rewrite"):
                         raise ValueError("Unknown worker method")
-                    result = engine.process(request["params"])
+                    method = (
+                        engine.process
+                        if request["method"] == "process"
+                        else engine.rewrite
+                    )
+                    result = method(request["params"])
                     write({"v": 1, "id": request["id"], "ok": True, "result": result})
                 except Exception as error:  # noqa: BLE001 — request boundary isolates model errors from the protocol.
                     identifier = (

@@ -246,7 +246,7 @@ test("a delivery timeout stays uncertain and is not retried", async (t) => {
   assert.equal(count, 1);
 });
 
-test("the controller remains busy through clipboard restoration", async (t) => {
+test("the controller remains busy through delivery bookkeeping", async (t) => {
   const delivery = deferred();
   const { controller } = harness(t, { native: { deliver: () => delivery.promise } });
   const session = await controller.beginRecording();
@@ -261,6 +261,202 @@ test("the controller remains busy through clipboard restoration", async (t) => {
   delivery.resolve({ delivery: "dispatched" });
   await pending;
   assert.equal(controller.getState().phase, "idle");
+});
+
+test("legacy cleanup migration preserves independent preferences and validates app rules", async (t) => {
+  const { controller } = harness(t);
+  const old = normalizeSettings({
+    cleanup: false,
+    historyEnabled: false,
+    launchAtLogin: true,
+    hotkey: "Alt+F3",
+    vocabulary: [],
+  });
+  assert.equal(old.editingMode, "exact");
+  assert.equal(old.historyEnabled, false);
+  assert.equal(old.launchAtLogin, true);
+  assert.equal(old.hotkey, "Alt+F3");
+  assert.deepEqual(old.vocabulary, []);
+  const enabled = normalizeSettings({ cleanup: true });
+  assert.equal(enabled.editingMode, "polished");
+  const explicit = normalizeSettings({ cleanup: false, editingMode: "clean" });
+  assert.equal(explicit.cleanup, true);
+  const rule = {
+    bundleId: "app.example",
+    name: "Example",
+    editingMode: "clean",
+    style: "email",
+    format: "paragraphs",
+  };
+  await controller.updateSettings({ appRules: [rule] });
+  rule.name = "Mutated";
+  assert.equal(controller.getState().settings.appRules[0].name, "Example");
+  await assert.rejects(controller.updateSettings({ appRules: [rule, rule] }), /one style/);
+  await assert.rejects(
+    controller.updateSettings({ appRules: [{ ...rule, style: "custom" }] }),
+    /Invalid app/
+  );
+  await assert.rejects(controller.updateSettings({ editingMode: "unknown" }), /Invalid editing/);
+});
+
+test("app rule is resolved from the recording target and frozen until completion", async (t) => {
+  const { controller, calls } = harness(t);
+  await controller.updateSettings({
+    appRules: [
+      {
+        bundleId: "app.example",
+        name: "Example",
+        editingMode: "clean",
+        style: "email",
+        format: "paragraphs",
+      },
+    ],
+  });
+  const session = await controller.beginRecording();
+  await controller.updateSettings({ editingMode: "exact", appRules: [] });
+  const record = await controller.transcribe({
+    requestId: session.requestId,
+    audio: wav(),
+    durationMs: 100,
+  });
+  assert.equal(session.settings.editingMode, "clean");
+  assert.equal(calls.inference[0].editingMode, "clean");
+  assert.equal(calls.inference[0].style, "email");
+  assert.equal(calls.inference[0].format, "paragraphs");
+  assert.equal(record.targetApp.bundleId, "app.example");
+  assert.equal(record.editingMode, "clean");
+});
+
+test("retry always starts from original, fixes old off/failed labels, and undo survives restart", async (t) => {
+  let input;
+  const { controller, history, directory, calls } = harness(t, {
+    inference: {
+      rewrite: async (args) => {
+        input = args;
+        return {
+          text: "Keep the original, please.",
+          actualProfile: "air",
+          timings: { cleanupMs: 25 },
+        };
+      },
+    },
+  });
+  const session = await controller.beginRecording();
+  await controller.transcribe({ requestId: session.requestId, audio: wav(), durationMs: 100 });
+  for (const status of ["off", "failed"]) {
+    history.update(session.requestId, {
+      text: "Previous edit.",
+      cleanupStatus: status,
+      warning: "Old warning",
+    });
+    await controller.updateSettings({ editingMode: "clean", profile: "air", style: "chat" });
+    const retried = await controller.rewriteTranscript(session.requestId);
+    assert.equal(input.text, "keep the original");
+    assert.equal(input.profile, "air");
+    assert.equal(retried.cleanupStatus, "applied");
+    assert.equal(retried.edit.profile, "air");
+    assert.equal(retried.actualProfile, "studio", "ASR provenance remains original");
+    assert.equal(retried.warning, undefined);
+    const reloaded = new History(path.join(directory, "history.json"));
+    assert.equal(reloaded.get(session.requestId).previousVersion.cleanupStatus, status);
+    controller.history = reloaded;
+    const restored = await controller.undoTranscript(session.requestId);
+    assert.equal(restored.text, "Previous edit.");
+    assert.equal(restored.cleanupStatus, status);
+    assert.equal(restored.warning, "Old warning");
+    assert.equal(restored.previousVersion, undefined);
+    await assert.rejects(controller.undoTranscript(session.requestId), /No previous/);
+    controller.history = history;
+  }
+  assert.equal(calls.delivery.length, 1);
+});
+
+test("guarded retries keep current text; explicit acceptance and undo do not paste", async (t) => {
+  const { controller, calls } = harness(t, {
+    inference: {
+      rewrite: async () => ({
+        text: "keep the original",
+        candidateText: "Send fifty copies.",
+        reviewReasons: ["A number changed."],
+        warning: "Review this edit.",
+        actualProfile: "air",
+        timings: { cleanupMs: 40 },
+      }),
+    },
+  });
+  const session = await controller.beginRecording();
+  await controller.transcribe({ requestId: session.requestId, audio: wav(), durationMs: 100 });
+  const candidate = await controller.rewriteTranscript(session.requestId);
+  assert.equal(candidate.text, "Keep the original.");
+  assert.equal(candidate.rawText, "keep the original");
+  const accepted = await controller.acceptSuggestion(session.requestId);
+  assert.equal(accepted.text, "Send fifty copies.");
+  assert.equal(accepted.cleanupStatus, "applied");
+  assert.equal(accepted.edit.source, "accepted");
+  assert.equal(accepted.candidateText, undefined);
+  const undone = await controller.undoTranscript(session.requestId);
+  assert.equal(undone.text, "Keep the original.");
+  assert.equal(undone.candidateText, "Send fifty copies.");
+  assert.equal(calls.delivery.length, 1);
+  assert.equal(calls.copy.length, 0);
+});
+
+test("Exact retry restores raw without models and unsaved history stays private", async (t) => {
+  let deliveries = 0;
+  const { controller, directory } = harness(t, {
+    inference: { rewrite: async () => assert.fail("Exact cannot run the editor") },
+    native: {
+      deliver: async () => {
+        deliveries++;
+        return { delivery: "dispatched" };
+      },
+    },
+  });
+  await controller.updateSettings({ historyEnabled: false });
+  const session = await controller.beginRecording();
+  await controller.transcribe({ requestId: session.requestId, audio: wav(), durationMs: 100 });
+  await controller.updateSettings({ editingMode: "exact" });
+  const exact = await controller.rewriteTranscript(session.requestId);
+  assert.equal(exact.text, "keep the original");
+  assert.equal(exact.cleanupStatus, "off");
+  assert.equal(exact.edit.elapsedMs, 0);
+  await controller.undoTranscript(session.requestId);
+  assert.equal(new History(path.join(directory, "history.json")).list().length, 0);
+  assert.equal(deliveries, 1);
+});
+
+test("failed retry save preserves the last version and cancellation discards late results", async (t) => {
+  const pending = deferred();
+  const { controller, history } = harness(t, { inference: { rewrite: () => pending.promise } });
+  const session = await controller.beginRecording();
+  await controller.transcribe({ requestId: session.requestId, audio: wav(), durationMs: 100 });
+  const original = history.get(session.requestId);
+  const run = controller.rewriteTranscript(session.requestId);
+  await controller.cancel();
+  pending.resolve({ text: "Late change." });
+  await assert.rejects(run, { name: "AbortError" });
+  assert.deepEqual(history.get(session.requestId), original);
+  controller.inference.rewrite = async () => ({ text: "New version." });
+  history.commit = () => {
+    throw new Error("Disk full");
+  };
+  await assert.rejects(controller.rewriteTranscript(session.requestId), /Disk full/);
+  assert.deepEqual(history.get(session.requestId), original);
+  assert.equal(controller.getState().phase, "idle");
+});
+
+test("initial cleanup can be undone without altering the delivered text or original", async (t) => {
+  const { controller, calls } = harness(t);
+  const session = await controller.beginRecording();
+  await controller.transcribe({ requestId: session.requestId, audio: wav(), durationMs: 100 });
+  const undone = await controller.undoTranscript(session.requestId);
+  assert.equal(undone.text, "keep the original");
+  assert.equal(undone.rawText, "keep the original");
+  assert.equal(undone.cleanupStatus, "off");
+  assert.equal(undone.editingMode, "exact");
+  assert.equal(undone.previousVersion, undefined);
+  assert.equal(calls.delivery.length, 1);
+  assert.equal(calls.delivery[0].text, "Keep the original.");
 });
 
 test("rewrite changes edited text only and never pastes again", async (t) => {

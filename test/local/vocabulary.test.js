@@ -129,3 +129,24 @@ test("meaning review keeps original and reviewable candidate for changed facts/l
     assert.ok(result.reviewReasons.length);
   }
 });
+
+test("only a resolved opening name search can lose its incidental negation", () => {
+  const retained = "I don't recall the name of the application. Oh, right, Quartz. Is it working?";
+  assert.deepEqual(
+    reviewEdit("I don't recall the name of the app oh right Quartz is it working", retained),
+    { text: retained }
+  );
+  for (const raw of [
+    "I don't recall the name of the app what's it called oh right Quartz is it working",
+    "I don’t remember the name of the tool. What's it called? Oh, right, Quartz. Is it working?",
+  ])
+    assert.deepEqual(reviewEdit(raw, "Is Quartz working?"), { text: "Is Quartz working?" });
+  for (const [raw, output] of [
+    ["I don't remember whether Quartz worked last time", "Quartz worked last time."],
+    ["I don't recall the name of the app", "The app is Quartz."],
+    ["I don't recall the name of the app oh right Quartz is it working", "Is Ruby working?"],
+    ["I don't recall the name of the app oh right it is not working", "It is not working."],
+    ["I don't recall the name of the app oh right Quartz do not deploy it", "Deploy Quartz."],
+  ])
+    assert.equal(reviewEdit(raw, output).text, raw);
+});

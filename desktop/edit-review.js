@@ -102,6 +102,20 @@ function negations(text) {
   );
 }
 
+function withoutResolvedNameSearch(text, candidate) {
+  // Exempt only an opening search for a name that the speaker then supplies.
+  // Uncertainty about events ("I don't remember whether...") stays substantive.
+  const match = text.match(
+    /^\s*(?:so[,\s]+)?i\s+(?:don't|don’t|do not)\s+(?:recall|remember)\s+the\s+name(?:\s+of\s+the\s+(?:app|tool|service|project))?[,?.\s]*(?:(?:what(?:'s|’s| is)\s+it\s+called)[,?.\s]*)?(?:oh[,\s]+right|oh[,\s]+yes)[,!.\s]+([\p{L}][\p{L}\p{N}_-]*)/iu
+  );
+  if (!match) return text;
+  const name = match[1];
+  if (/^(?:i|it|the|a|an|that|this|we|you|he|she|they|is|was|no|not|never)$/i.test(name))
+    return text;
+  if (![...candidate.matchAll(phrasePattern([name]))].length) return text;
+  return name + text.slice(match[0].length);
+}
+
 function resolveNumericCorrections(text) {
   return normalizeNumbers(text)
     .replace(
@@ -129,7 +143,10 @@ function reviewEdit(original, edited, vocabulary = []) {
   if (!sameCounts(a, b)) {
     reasons.push("A number or amount may have changed.");
   }
-  if (!sameCounts(negations(comparable), negations(candidate)))
+  if (
+    !sameCounts(negations(comparable), negations(candidate)) &&
+    !sameCounts(negations(withoutResolvedNameSearch(comparable, candidate)), negations(candidate))
+  )
     reasons.push("A negative or exclusion may have changed.");
   for (const { word } of vocabulary) {
     const pattern = phrasePattern([word]);

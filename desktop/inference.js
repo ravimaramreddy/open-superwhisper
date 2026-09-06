@@ -44,6 +44,14 @@ function findUv(configured) {
   throw new Error("Install uv from astral.sh/uv, then run local setup again");
 }
 
+function editingOptions(editingMode, cleanup, style, format) {
+  const mode = editingMode ?? (cleanup === false ? "exact" : "polished");
+  if (!["exact", "clean", "polished"].includes(mode)) throw new Error("Invalid editing mode");
+  if (!["neutral", "chat", "email"].includes(style)) throw new Error("Invalid text style");
+  if (!["prose", "paragraphs", "list"].includes(format)) throw new Error("Invalid text format");
+  return mode;
+}
+
 async function validateAudio(audioPath, userData) {
   const [resolved, root] = await Promise.all([fsp.realpath(audioPath), fsp.realpath(userData)]);
   const relative = path.relative(root, resolved);
@@ -261,12 +269,15 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     audioPath,
     profile = "auto",
     cleanup = true,
+    editingMode,
+    style = "neutral",
     vocabulary = [],
     format = "prose",
     signal,
   }) {
     vocabulary = normalizeVocabulary(vocabulary);
-    if (!["prose", "paragraphs", "list"].includes(format)) throw new Error("Invalid text format");
+    editingMode = editingOptions(editingMode, cleanup, style, format);
+    cleanup = editingMode !== "exact";
     signal = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     return exclusive(async () => {
       if (!["auto", "studio", "air"].includes(profile)) throw new Error("Unknown speech profile");
@@ -279,7 +290,15 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
             ? "Mac Studio is unavailable; using local models"
             : "Starting local speech recognition"
         );
-        const result = await air.process({ audioPath, cleanup, vocabulary, format, signal });
+        const result = await air.process({
+          audioPath,
+          cleanup,
+          editingMode,
+          style,
+          vocabulary,
+          format,
+          signal,
+        });
         throwIfAborted(signal);
         return {
           ...result,
@@ -311,6 +330,8 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
           text = await studio.edit({
             text: applyVocabulary(rawText, vocabulary),
             vocabulary,
+            editingMode,
+            style,
             format,
             signal,
           });
@@ -340,25 +361,62 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     }, signal);
   }
 
-  async function rewrite({ text, vocabulary = [], format = "prose", signal }) {
+  async function rewrite({
+    text,
+    profile = "auto",
+    editingMode = "polished",
+    style = "neutral",
+    vocabulary = [],
+    format = "prose",
+    signal,
+  }) {
     vocabulary = normalizeVocabulary(vocabulary);
-    if (!["prose", "paragraphs", "list"].includes(format)) throw new Error("Invalid text format");
+    editingMode = editingOptions(editingMode, true, style, format);
+    if (!["auto", "studio", "air"].includes(profile)) throw new Error("Unknown speech profile");
     signal = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     return exclusive(async () => {
       if (typeof text !== "string" || text.length > 32768)
         throw new Error("Invalid or oversized transcript");
       const started = now();
-      const output = await studio.edit({
+      if (editingMode === "exact")
+        return { text, cleanupStatus: "off", timings: { asrMs: 0, cleanupMs: 0, totalMs: 0 } };
+      const params = {
         text: applyVocabulary(text, vocabulary),
         vocabulary,
+        editingMode,
+        style,
         format,
-        rewrite: true,
         signal,
-      });
+      };
+      const local = async (fallbackReason) => {
+        onProgress("Correcting the original transcript locally");
+        const result = await air.rewrite(params);
+        throwIfAborted(signal);
+        return {
+          ...result,
+          ...reviewEdit(text, result.text, vocabulary),
+          actualProfile: "air",
+          cleanupStatus: "applied",
+          ...(fallbackReason ? { fallbackReason } : {}),
+          timings: { asrMs: 0, cleanupMs: now() - started, totalMs: now() - started },
+        };
+      };
+      if (profile === "air") return local();
+      let output;
+      try {
+        output = await studio.edit({ ...params, rewrite: true });
+      } catch (error) {
+        throwIfAborted(signal);
+        if (profile === "auto" && error.code === "STUDIO_UNAVAILABLE")
+          return local("Mac Studio text correction was unavailable");
+        throw error;
+      }
       throwIfAborted(signal);
       return {
         ...reviewEdit(text, output, vocabulary),
-        timings: { cleanupMs: now() - started, totalMs: now() - started },
+        actualProfile: "studio",
+        cleanupStatus: "applied",
+        timings: { asrMs: 0, cleanupMs: now() - started, totalMs: now() - started },
       };
     }, signal);
   }

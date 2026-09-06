@@ -1,11 +1,63 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
+const { MODES, STYLES, FORMATS, validApp } = require("./editing-settings");
 
 const MAX_RECORDS = 100;
 const MAX_TEXT = 100_000;
 const MAX_FILE_BYTES = 24 * 1024 * 1024;
 const DELIVERY = new Set(["pending", "dispatched", "clipboard-only", "uncertain", "cancelled"]);
+const VERSION_KEYS = [
+  "text",
+  "cleanupStatus",
+  "warning",
+  "candidateText",
+  "reviewReasons",
+  "editingMode",
+  "style",
+  "format",
+  "edit",
+];
+
+function textVersion(record) {
+  return Object.fromEntries(VERSION_KEYS.map((key) => [key, structuredClone(record[key])]));
+}
+
+function validVersion(record) {
+  return (
+    record &&
+    typeof record === "object" &&
+    typeof record.text === "string" &&
+    record.text.length <= MAX_TEXT &&
+    ["off", "applied", "failed"].includes(record.cleanupStatus) &&
+    (record.warning === undefined ||
+      (typeof record.warning === "string" && record.warning.length <= 4000)) &&
+    (record.candidateText === undefined ||
+      (typeof record.candidateText === "string" &&
+        record.candidateText.length > 0 &&
+        record.candidateText.length <= MAX_TEXT)) &&
+    (record.reviewReasons === undefined ||
+      (Array.isArray(record.reviewReasons) &&
+        record.reviewReasons.length > 0 &&
+        record.reviewReasons.length <= 8 &&
+        record.reviewReasons.every(
+          (reason) => typeof reason === "string" && reason.length > 0 && reason.length <= 500
+        ))) &&
+    Boolean(record.candidateText) === Boolean(record.reviewReasons) &&
+    (record.editingMode === undefined || MODES.has(record.editingMode)) &&
+    (record.style === undefined || STYLES.has(record.style)) &&
+    (record.format === undefined || FORMATS.has(record.format)) &&
+    (record.edit === undefined ||
+      (record.edit &&
+        ["dictation", "retry", "accepted"].includes(record.edit.source) &&
+        ["studio", "air"].includes(record.edit.profile) &&
+        Number.isFinite(record.edit.elapsedMs) &&
+        record.edit.elapsedMs >= 0 &&
+        (record.edit.fallbackReason === undefined ||
+          (typeof record.edit.fallbackReason === "string" &&
+            record.edit.fallbackReason.length <= 4000))))
+  );
+}
 
 function atomicWrite(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -32,16 +84,18 @@ function validRecord(record) {
   return (
     record &&
     typeof record === "object" &&
+    validVersion(record) &&
+    (record.targetApp === undefined || validApp(record.targetApp)) &&
+    (record.previousVersion === undefined ||
+      (validVersion(record.previousVersion) &&
+        Object.keys(record.previousVersion).every((key) => VERSION_KEYS.includes(key)))) &&
     typeof record.id === "string" &&
     /^[a-zA-Z0-9-]{1,80}$/.test(record.id) &&
     typeof record.createdAt === "string" &&
     Number.isFinite(Date.parse(record.createdAt)) &&
     typeof record.rawText === "string" &&
     record.rawText.length <= MAX_TEXT &&
-    typeof record.text === "string" &&
-    record.text.length <= MAX_TEXT &&
     ["studio", "air"].includes(record.actualProfile) &&
-    ["off", "applied", "failed"].includes(record.cleanupStatus) &&
     Number.isFinite(record.durationMs) &&
     record.durationMs >= 0 &&
     DELIVERY.has(record.delivery) &&
@@ -49,22 +103,8 @@ function validRecord(record) {
     ["asrMs", "cleanupMs", "totalMs"].every(
       (key) => Number.isFinite(record.timings[key]) && record.timings[key] >= 0
     ) &&
-    ["warning", "fallbackReason"].every(
-      (key) =>
-        record[key] === undefined || (typeof record[key] === "string" && record[key].length <= 4000)
-    ) &&
-    (record.candidateText === undefined ||
-      (typeof record.candidateText === "string" &&
-        record.candidateText.length > 0 &&
-        record.candidateText.length <= MAX_TEXT)) &&
-    (record.reviewReasons === undefined ||
-      (Array.isArray(record.reviewReasons) &&
-        record.reviewReasons.length > 0 &&
-        record.reviewReasons.length <= 8 &&
-        record.reviewReasons.every(
-          (reason) => typeof reason === "string" && reason.length > 0 && reason.length <= 500
-        ))) &&
-    Boolean(record.candidateText) === Boolean(record.reviewReasons)
+    (record.fallbackReason === undefined ||
+      (typeof record.fallbackReason === "string" && record.fallbackReason.length <= 4000))
   );
 }
 
@@ -125,10 +165,15 @@ class History {
   }
 
   commit(records, persistent = this.persistent) {
-    atomicWrite(this.file, {
+    const value = {
       version: 1,
       records: records.filter((record) => persistent.has(record.id)),
-    });
+    };
+    if (Buffer.byteLength(JSON.stringify(value, null, 2)) > MAX_FILE_BYTES)
+      throw new Error(
+        "History is full. Copy your latest text, then remove older entries to make room."
+      );
+    atomicWrite(this.file, value);
     this.records = records;
     this.persistent = persistent;
   }
@@ -156,8 +201,8 @@ class History {
     if (!current) throw new Error("Transcript not found");
     // Rewrites and delivery changes cannot replace original ASR output or identity.
     const allowed = {};
-    for (const key of ["text", "warning", "delivery", "candidateText", "reviewReasons"])
-      if (Object.hasOwn(changes, key)) allowed[key] = changes[key];
+    for (const key of [...VERSION_KEYS, "delivery", "previousVersion"])
+      if (Object.hasOwn(changes, key)) allowed[key] = structuredClone(changes[key]);
     const updated = { ...current, ...allowed };
     if (!validRecord(updated)) throw new Error("Invalid transcript update");
     const records = this.records.map((record) => (record.id === id ? updated : record));
@@ -182,4 +227,4 @@ class History {
   }
 }
 
-module.exports = { History, atomicWrite, validRecord, MAX_TEXT };
+module.exports = { History, atomicWrite, validRecord, textVersion, MAX_TEXT };

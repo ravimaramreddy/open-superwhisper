@@ -155,3 +155,33 @@ installed app's Settings and latest-result controls were visually verified; its
 archive, worker, prompt and native addon matched the build. Existing preferences
 were byte-for-byte unchanged. No new physical microphone/paste trial was conducted
 for this feature; the native paste path is unchanged from the verified earlier fix.
+
+## Editing modes, app preferences and recovery
+
+The current regression suite has 109 Node tests and 14 Python tests. Added cases
+cover settings compatibility, target-app snapshots, retries from immutable ASR,
+one-level undo across restart, explicit candidate acceptance, accurate current
+cleanup status, failed saves, cancellation and no repeated delivery. Diff tests
+reconstruct both inputs for 2,000 randomized cases and exercise 100k-character
+inputs with bounded comparison work.
+
+A simulated target reads the clipboard 300 ms after dispatch and receives the
+dictation. The old 180 ms restoration race is removed; later user copies are
+never overwritten by a delayed restoration. This test does not prove that every
+destination application accepts synthetic paste events.
+
+Synthetic text-only requests ran through the real Studio and Air clients with
+the pinned models. Both corrected tested grammar and retained tested amounts,
+exclusions and uncertainty. The resolved name-search example now passes the
+production guard and becomes “Is Quartz working?” on Studio. Air kept some
+abandoned wording, so the UI explicitly describes its limited restructuring.
+Clean/Polished intentionally share S1's trained controls. Studio retry and normal
+dictation now use the same mode-aware cleanup prompt; email layout was checked
+with a separate greeting/body/sign-off example. Warm short-text edits measured
+roughly 0.18–0.46 seconds, excluding ASR; cold starts were slower. These are small,
+iteratively reused development checks, not a held-out accuracy benchmark.
+
+Browser preview checks exercised highlighted suggestions, acceptance, Undo,
+Retry, separate processing details and an app-specific Exact preference. The
+preview makes these changes only to synthetic in-memory records. Native app
+launch/packaging checks remain separate from these preview interactions.

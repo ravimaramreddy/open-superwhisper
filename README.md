@@ -13,8 +13,10 @@ Press **Escape** to cancel. Recordings stop after two minutes.
 
 Automatic mode falls back when Studio speech is unavailable. A correction failure
 keeps the original transcript and shows a warning. Choosing Studio explicitly does
-not silently switch machines. **Rewrite with Studio** is a separate, deliberate
-action: review and copy its result yourself.
+not silently switch machines. **Retry from original** uses the current processing
+choice and editing settings, without recording or pasting again. Automatic retries
+can use this Mac when Studio's editor connection is unavailable; a failed or
+invalid edit preserves the previous version.
 
 ## Your words and English cleanup
 
@@ -29,16 +31,28 @@ and existing canonical names are protected. A saved alias is an explicit rule:
 avoid common words that can legitimately mean something else. Studio also sees
 the dictionary when editing. The Air's S1 uses its trained prompt; exact spelling
 corrections are applied afterward. **Copy original** retains the untouched ASR
-output. Turning cleanup off leaves that output as the delivered text.
+output. **Exact** leaves that output as the delivered text.
 
-**Clean English** repairs grammar and false starts. Choose prose, paragraphs or
-a list; paragraph guidance applies to Studio, while the Air uses S1's trained
-prose/list styles. **Rewrite with Studio** remains a separate action.
+Choose **Exact**, **Clean English** (grammar, punctuation and fillers) or
+**Polished** (clearer wording and organization). Existing cleanup-enabled settings
+become Polished. On Air, Clean and Polished use the same compact S1 editor;
+Studio provides the stronger restructuring. S1 does not support a separate
+editing-strength instruction.
+
+Choose a neutral, chat or email style, with prose, paragraphs or a list. Paragraph
+guidance applies to Studio; Air uses S1's trained prose/list and general/email
+controls. **Settings → App preferences** can save separate choices for apps used in
+dictation. Record into an app once to make it available, then add its rule. Rules
+use the app identity captured at recording start, without reading screen content.
+An app rule overrides the global editing choices, including during a retry.
 
 Both paths check selected changes to numbers, negatives/exclusions, dictionary
 names and quoted/technical text. A flagged edit keeps the previous text and
-stores a suggested edit with reasons. Review and **Copy suggestion** explicitly
-if wanted; suggestions are never automatically pasted. These are conservative
+stores a suggested edit with reasons. Review highlighted additions and removals,
+then explicitly **Use suggestion** or copy it if wanted. **Undo edit** restores
+one previous version in History, including an initial cleanup. Retrying always
+starts from the original speech text. These actions never change text already
+inserted into another app; copy the version you want to use. These are conservative
 checks, not a guarantee: they can flag legitimate edits and miss changed meaning,
 including unknown names or reordered facts. S1 cleanup is English-only.
 
@@ -88,15 +102,21 @@ it a five-minute idle lifetime, and unloads only its own instance when closing.
 
 ## Originals and privacy
 
-- History keeps the latest 100 original and edited transcripts locally. The
-  original stays unchanged when you rewrite. Turn history off to avoid saving
+- History keeps up to 100 original and edited transcripts locally, including
+  one previous edit and the destination app's name/identifier. A 24 MB file limit
+  also applies; if full, copy the latest result and remove older entries. The
+  original stays unchanged when you edit. Turn history off to avoid saving
   new transcripts; existing history remains until you delete it.
 - Temporary audio is removed when processing completes or is cancelled.
   App-owned recordings left by a crash are removed on the next launch.
   Raw text is saved before automatic delivery when history is enabled.
-- If focus changes, text stays on the clipboard. An uncertain paste is never
-  automatically retried: check the target before pasting again.
-- Cleanup models can change meaning despite the review checks. Disable cleanup when exact wording matters,
+- Dictated text stays on the clipboard after paste is sent, so a busy app can
+  consume it later. The previous clipboard is not restored on a timer. "Initial
+  paste sent" confirms keyboard dispatch, not insertion in the destination.
+  An uncertain paste is never automatically retried: check the target first.
+- Processing details show speech, cleanup and total durations, the machine used
+  and any fallback. History edits have separate timing and machine information.
+- Cleanup models can change meaning despite the review checks. Choose Exact when exact wording matters,
   or recover **Copy original** from the latest dictation or History.
 - App data lives in `~/Library/Application Support/OpenSuperwhisper` and is
   separate from OpenWhispr. Voice processing uses your Macs; installation obtains

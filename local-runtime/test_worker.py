@@ -85,8 +85,8 @@ class WorkerTest(unittest.TestCase):
             observed["asr"] = kwargs
             return types.SimpleNamespace(text=" Original words ", generation_tokens=2)
 
-        def clean(text, format):
-            observed["clean"] = {"text": text, "format": format}
+        def clean(text, format, style):
+            observed["clean"] = {"text": text, "format": format, "style": style}
             return "- Edited words"
 
         engine.asr = types.SimpleNamespace(generate=generate)
@@ -107,7 +107,8 @@ class WorkerTest(unittest.TestCase):
             )
         self.assertEqual(observed["asr"]["hotwords"], ["OpenSuperwhisper"])
         self.assertEqual(
-            observed["clean"], {"text": "Original words", "format": "list"}
+            observed["clean"],
+            {"text": "Original words", "format": "list", "style": "neutral"},
         )
         self.assertEqual(result["rawText"], "Original words")
         self.assertEqual(result["text"], "- Edited words")
@@ -200,6 +201,106 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(result["text"], "Original")
         self.assertEqual(result["cleanupStatus"], "failed")
         self.assertEqual(result["warning"], "cleanup failed")
+
+    def test_text_retry_does_not_load_or_run_speech_recognition(self):
+        engine = worker.Engine("qwen", "s1", ".", lambda _message: None)
+        engine.load_asr = lambda: self.fail("retry must not load ASR")
+        observed = []
+        engine.clean = lambda text, **kwargs: (
+            observed.append((text, kwargs)) or "Edited."
+        )
+        result = engine.rewrite(
+            {"text": "raw", "editingMode": "clean", "style": "email", "format": "list"}
+        )
+        self.assertEqual(observed, [("raw", {"format": "list", "style": "email"})])
+        self.assertEqual(result["text"], "Edited.")
+        self.assertEqual(result["cleanupStatus"], "applied")
+        self.assertEqual(result["timings"]["asrMs"], 0)
+        result = engine.rewrite({"text": "raw", "editingMode": "exact"})
+        self.assertEqual(result["text"], "raw")
+        self.assertEqual(result["cleanupStatus"], "off")
+        self.assertEqual(len(observed), 1)
+
+    def test_cold_text_retry_initializes_mlx_without_loading_asr(self):
+        engine = worker.Engine("qwen", "s1", ".", lambda _message: None)
+        engine.load_asr = lambda: self.fail("retry must not load ASR")
+        observed = []
+        tokenizer = types.SimpleNamespace(
+            apply_chat_template=lambda messages, **_kwargs: (
+                observed.append(messages) or "prompt"
+            )
+        )
+        mx = types.SimpleNamespace(synchronize=lambda: None)
+        modules = {
+            "mlx": types.SimpleNamespace(core=mx),
+            "mlx.core": mx,
+            "mlx_lm": types.SimpleNamespace(
+                load=lambda _path: (object(), tokenizer),
+                stream_generate=lambda *_args, **_kwargs: iter(
+                    [types.SimpleNamespace(text="Edited.")]
+                ),
+            ),
+            "mlx_lm.sample_utils": types.SimpleNamespace(
+                make_sampler=lambda **_kwargs: None
+            ),
+        }
+        with patch.dict("sys.modules", modules):
+            result = engine.rewrite(
+                {"text": "raw", "editingMode": "polished", "style": "email"}
+            )
+        self.assertEqual(result["text"], "Edited.")
+        self.assertIsNone(engine.asr)
+        self.assertIs(engine.mx, mx)
+        self.assertEqual(
+            observed[0][1]["content"],
+            "[Styling: semi-formal] [Structure: prose] [Context: email]\nraw",
+        )
+
+    def test_clean_and_polished_use_only_s1_trained_controls(self):
+        for style, context in [
+            ("neutral", "general"),
+            ("chat", "general"),
+            ("email", "email"),
+        ]:
+            self.assertEqual(
+                worker.s1_controls("list", style),
+                f"[Styling: semi-formal] [Structure: lists] [Context: {context}]\n",
+            )
+        for options in [
+            {"editingMode": "arbitrary prompt"},
+            {"style": "arbitrary prompt"},
+        ]:
+            with self.assertRaises(ValueError):
+                worker.editing_mode(options)
+
+    def test_protocol_dispatches_retry_without_audio(self):
+        reader, writer = os.pipe()
+        responses = []
+        engine = types.SimpleNamespace(
+            process=lambda _params: self.fail("retry must not call process"),
+            rewrite=lambda params: {"text": params["text"]},
+        )
+        os.write(
+            writer,
+            (
+                json.dumps(
+                    {
+                        "v": 1,
+                        "id": "retry",
+                        "method": "rewrite",
+                        "params": {"text": "Original"},
+                    }
+                )
+                + "\n"
+            ).encode(),
+        )
+        os.close(writer)
+        worker.serve(engine, reader, responses.append, 0.1)
+        os.close(reader)
+        self.assertEqual(
+            responses[-1],
+            {"v": 1, "id": "retry", "ok": True, "result": {"text": "Original"}},
+        )
 
 
 if __name__ == "__main__":
