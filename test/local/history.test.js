@@ -23,6 +23,45 @@ const row = (id = "first") => ({
   delivery: "pending",
 });
 
+test("Gemini origin and combined timing survive local edits and restart", (t) => {
+  const { history, file } = fixture(t);
+  const gemini = {
+    ...row("gemini-sample"),
+    actualProfile: "gemini",
+    timings: { asrMs: 0, cleanupMs: 0, geminiMs: 1450, totalMs: 1450 },
+    edit: { source: "dictation", profile: "gemini", elapsedMs: 0 },
+  };
+  history.save(gemini);
+  history.update(gemini.id, {
+    text: "A local revision.",
+    edit: { source: "retry", profile: "studio", elapsedMs: 230 },
+    previousVersion: { text: gemini.text, cleanupStatus: "applied", edit: gemini.edit },
+  });
+  const saved = new History(file).get(gemini.id);
+  assert.equal(saved.actualProfile, "gemini");
+  assert.equal(saved.rawText, gemini.rawText);
+  assert.deepEqual(saved.timings, gemini.timings);
+  assert.equal(saved.edit.profile, "studio");
+  assert.equal(saved.previousVersion.edit.profile, "gemini");
+});
+
+test("optional Gemini attempt timing accepts local fallback and rejects invalid durations", (t) => {
+  const { history, file } = fixture(t);
+  history.save(row("legacy"));
+  const fallback = {
+    ...row("fallback"),
+    timings: { ...row().timings, geminiMs: 920, totalMs: 925 },
+  };
+  history.save(fallback);
+  assert.deepEqual(new History(file).get("fallback").timings, fallback.timings);
+  assert.equal(new History(file).get("legacy").timings.geminiMs, undefined);
+  for (const invalid of [-1, Infinity, NaN, "10", null])
+    assert.throws(
+      () => history.save({ ...row("invalid"), timings: { ...row().timings, geminiMs: invalid } }),
+      /Invalid transcript/
+    );
+});
+
 test("original and identity are immutable across updates; duplicate saves return first record", (t) => {
   const { history } = fixture(t);
   history.save(row());

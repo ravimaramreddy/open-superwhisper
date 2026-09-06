@@ -36,7 +36,7 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
   for (const key of Object.keys(patch)) {
     if (!Object.hasOwn(DEFAULT_SETTINGS, key)) throw new Error("Unknown setting");
     const value = patch[key];
-    if (key === "profile" && !["auto", "studio", "air"].includes(value))
+    if (key === "profile" && !["auto", "studio", "air", "gemini"].includes(value))
       throw new Error("Invalid profile");
     if (key === "editingMode" && !MODES.has(value)) throw new Error("Invalid editing mode");
     if (key === "style" && !STYLES.has(value)) throw new Error("Invalid writing style");
@@ -195,6 +195,7 @@ class Controller {
       permissions: permissions.get(),
       localReady: false,
       studio: "unknown",
+      gemini: "unknown",
       phase: "idle",
       progress: "",
       latest: history.list()[0] || null,
@@ -263,10 +264,18 @@ class Controller {
     const checks = await Promise.allSettled([
       this.inference.isLocalReady(),
       this.inference.checkStudio(),
+      this.state.settings.profile === "gemini"
+        ? (this.inference.checkGemini?.() ?? Promise.resolve("unconfigured"))
+        : Promise.resolve(this.state.gemini),
     ]);
     this.state.localReady = checks[0].status === "fulfilled" && checks[0].value === true;
     this.state.studio =
       checks[1].status === "fulfilled" && checks[1].value === true ? "ready" : "offline";
+    this.state.gemini =
+      checks[2].status === "fulfilled" &&
+      ["unknown", "ready", "offline", "unconfigured"].includes(checks[2].value)
+        ? checks[2].value
+        : "offline";
     this.emit();
     return this.getState();
   }
@@ -406,7 +415,11 @@ class Controller {
       });
       this.assertOwned(request);
       if (result.actualProfile === "studio") this.state.studio = "ready";
-      else if (result.fallbackReason) this.state.studio = "offline";
+      else if (result.actualProfile === "air" && result.fallbackReason)
+        this.state.studio = "offline";
+      if (result.actualProfile === "gemini") this.state.gemini = "ready";
+      else if (request.settings.profile === "gemini" && this.state.gemini !== "unconfigured")
+        this.state.gemini = "offline";
       if (
         typeof result?.rawText !== "string" ||
         typeof result?.text !== "string" ||
@@ -438,7 +451,8 @@ class Controller {
         edit: {
           source: "dictation",
           profile: result.actualProfile,
-          elapsedMs: result.timings.cleanupMs,
+          elapsedMs:
+            result.actualProfile === "gemini" ? result.timings.geminiMs : result.timings.cleanupMs,
         },
         ...(request.targetApp ? { targetApp: request.targetApp } : {}),
         delivery: "pending",

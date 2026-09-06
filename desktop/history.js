@@ -50,7 +50,7 @@ function validVersion(record) {
     (record.edit === undefined ||
       (record.edit &&
         ["dictation", "retry", "accepted"].includes(record.edit.source) &&
-        ["studio", "air"].includes(record.edit.profile) &&
+        ["studio", "air", "gemini"].includes(record.edit.profile) &&
         Number.isFinite(record.edit.elapsedMs) &&
         record.edit.elapsedMs >= 0 &&
         (record.edit.fallbackReason === undefined ||
@@ -107,7 +107,7 @@ function validRecord(record) {
     Number.isFinite(Date.parse(record.createdAt)) &&
     typeof record.rawText === "string" &&
     record.rawText.length <= MAX_TEXT &&
-    ["studio", "air"].includes(record.actualProfile) &&
+    ["studio", "air", "gemini"].includes(record.actualProfile) &&
     Number.isFinite(record.durationMs) &&
     record.durationMs >= 0 &&
     DELIVERY.has(record.delivery) &&
@@ -115,6 +115,8 @@ function validRecord(record) {
     ["asrMs", "cleanupMs", "totalMs"].every(
       (key) => Number.isFinite(record.timings[key]) && record.timings[key] >= 0
     ) &&
+    (record.timings.geminiMs === undefined ||
+      (Number.isFinite(record.timings.geminiMs) && record.timings.geminiMs >= 0)) &&
     (record.fallbackReason === undefined ||
       (typeof record.fallbackReason === "string" && record.fallbackReason.length <= 4000))
   );
@@ -211,7 +213,7 @@ class History {
   update(id, changes) {
     const current = this.get(id);
     if (!current) throw new Error("Transcript not found");
-    // Rewrites and delivery changes cannot replace original ASR output or identity.
+    // Rewrites and delivery changes cannot replace the initial transcript or identity.
     const allowed = {};
     for (const key of [
       ...VERSION_KEYS,

@@ -5,11 +5,12 @@ paste. Built on [OpenWhispr](https://github.com/OpenWhispr/openwhispr).
 Press **⌃⌥Space**, speak, then press it again to place the text in your focused app.
 Press **Escape** to cancel. Recordings stop after two minutes.
 
-| Mode      | Speech recognition                                         | Optional text cleanup         |
-| --------- | ---------------------------------------------------------- | ----------------------------- |
-| Automatic | Mac Studio first; this Mac if Studio speech is unavailable | Uses the matching machine     |
-| Studio    | Qwen3-ASR 1.7B, 8-bit                                      | Gemma 4 E4B through LM Studio |
-| This Mac  | Qwen3-ASR 1.7B, 8-bit through MLX                          | S1-mini by Superwhisper, BF16 |
+| Mode      | Speech recognition                                         | Optional text cleanup                  |
+| --------- | ---------------------------------------------------------- | -------------------------------------- |
+| Gemini    | Gemini 3.8 Flash through Google Cloud                      | Audio and polished text in one request |
+| Automatic | Mac Studio first; this Mac if Studio speech is unavailable | Uses the matching machine              |
+| Studio    | Qwen3-ASR 1.7B, 8-bit                                      | Gemma 4 E4B through LM Studio          |
+| This Mac  | Qwen3-ASR 1.7B, 8-bit through MLX                          | S1-mini by Superwhisper, BF16          |
 
 Automatic mode falls back when Studio speech is unavailable. A correction failure
 keeps the original transcript and shows a warning. Choosing Studio explicitly does
@@ -17,6 +18,15 @@ not silently switch machines. **Retry from original** uses the current processin
 choice and editing settings, without recording or pasting again. Automatic retries
 can use this Mac when Studio's editor connection is unavailable; a failed or
 invalid edit preserves the previous version.
+
+**Gemini** is an explicit cloud choice. It sends the current recording and writing
+preferences to Google Cloud, returning a generated transcript and polished text
+together. If configuration, sign-in, networking or the response fails, the same
+recording uses Automatic's Studio-then-this-Mac route. Cloud work has a 15-second
+deadline; it is not retried for that recording. Cancellation stops all processing
+and delivery. Existing Automatic, Studio and This Mac choices do not use Gemini.
+When Gemini is selected, **Retry locally** edits the saved transcript through
+the local Automatic route; it does not upload a saved recording again.
 
 ## Your words and English cleanup
 
@@ -46,7 +56,7 @@ dictation. Record into an app once to make it available, then add its rule. Rule
 use the app identity captured at recording start, without reading screen content.
 An app rule overrides the global editing choices, including during a retry.
 
-Both paths check selected changes to numbers, negatives/exclusions, dictionary
+The local paths check selected changes to numbers, negatives/exclusions, dictionary
 names and quoted/technical text. A flagged edit keeps the previous text and
 stores a suggested edit with reasons. Review highlighted additions and removals,
 then explicitly **Use suggestion** or copy it if wanted. **Undo edit** restores
@@ -55,6 +65,13 @@ starts from the original speech text. These actions never change text already
 inserted into another app; copy the version you want to use. These are conservative
 checks, not a guarantee: they can flag legitimate edits and miss changed meaning,
 including unknown names or reordered facts. S1 cleanup is English-only.
+
+Gemini's Polished mode focuses on the complete intended request, allowing fluent
+rephrasing and sensible repairs to spoken false starts. It does not use the local
+literal-count checks to reject such changes. Its generated transcript is another
+model output, not an independently verified reference. Compare it with the
+polished version or recording when needed. Exact delivers the generated transcript;
+Clean English requests lighter grammar and filler cleanup.
 
 ## First use
 
@@ -75,8 +92,48 @@ whole application's memory use.
    and use the shortcut. Starting from the app's own window copies the result
    for you to paste.
 
-The build is unsigned and intended for personal installation. No account,
-subscription, API key, or model catalog is involved.
+The build is unsigned and intended for personal installation. Local modes need
+no account or API key. The optional Gemini lane uses an existing Google Cloud
+sign-in and billable project, configured privately as described below.
+
+## Optional Gemini connection
+
+Install the [Google Cloud CLI](https://docs.cloud.google.com/sdk/docs/install) and
+sign in with `gcloud auth login`. Use a project with the Vertex AI API enabled and
+the intended billing account attached. Google Cloud usage is separately billed;
+any promotional credits are subject to their eligibility and expiry.
+
+Add a `gemini` object to the existing app-data `machine.json`, preserving any
+other local settings. The following values are **placeholders**:
+
+```json
+{
+  "gemini": {
+    "projectId": "your-cloud-project",
+    "billingAccountId": "AAAAAA-BBBBBB-CCCCCC",
+    "account": "your-account@example.com",
+    "gcloudPath": "/opt/homebrew/bin/gcloud"
+  }
+}
+```
+
+This file belongs at `~/Library/Application Support/OpenSuperwhisper/machine.json`,
+outside the checkout. Restrict access to your user (`chmod 600` on the file).
+The project and billing-account pin are required. The login account and absolute
+CLI path are optional; pinning the account avoids depending on whichever CLI
+login is currently active. Restart the app after changing this private file.
+
+Select **Gemini**, then **Check connections**. The app checks the project's billing
+attachment before obtaining an access token. This is a connection/authentication
+check, not a paid transcription or a credit-balance check. Access tokens and
+successful verification are cached in the main process for at most five minutes,
+then discarded or refreshed. No credentials are stored in History or renderer
+settings. No API-key input or arbitrary endpoint is supported.
+
+Keep This Mac's models prepared so fallback works when both the cloud and Studio
+are unavailable. The app does not switch billing accounts, enable APIs, purchase
+credits or initiate an interactive login. Missing configuration leaves local
+dictation usable. A billing pin is not a spending cap.
 
 ## Studio connection
 
@@ -115,13 +172,25 @@ it a five-minute idle lifetime, and unloads only its own instance when closing.
   consume it later. The previous clipboard is not restored on a timer. "Initial
   paste sent" confirms keyboard dispatch, not insertion in the destination.
   An uncertain paste is never automatically retried: check the target first.
-- Processing details show speech, cleanup and total durations, the machine used
+- Processing details show speech, cleanup and total durations, the route used
   and any fallback. History edits have separate timing and machine information.
+  Gemini shows combined audio/cleanup time; fallback keeps the cloud attempt's
+  time separate from the subsequent local stages.
 - Cleanup models can change meaning despite the review checks. Choose Exact when exact wording matters,
   or recover **Copy original** from the latest dictation or History.
 - App data lives in `~/Library/Application Support/OpenSuperwhisper` and is
-  separate from OpenWhispr. Voice processing uses your Macs; installation obtains
+  separate from OpenWhispr. Local modes process voice on your Macs; Gemini sends
+  only the current audio, vocabulary and writing preferences to the official
+  Google Cloud global endpoint. It does not send screen content, clipboard text,
+  app identity, previous dictations or local file paths. Installation obtains
   public packages and model files from their publishers.
+- Google Cloud's [service terms](https://cloud.google.com/terms/service-terms)
+  prohibit training on customer data without permission. Its
+  [privacy commitments](https://cloud.google.com/privacy/data-protection-impact-assessment)
+  exclude using customer content for advertising profiles. Requests remain tied
+  to the Cloud account; caching and abuse-monitoring retention can apply. See
+  [data retention](https://docs.cloud.google.com/gemini-enterprise-agent-platform/resources/zero-data-retention).
+  The app does not establish a zero-retention exemption or alter project privacy settings.
 
 ### Save audio for testing
 

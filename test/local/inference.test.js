@@ -30,14 +30,25 @@ function fixture(overrides = {}) {
     check: async () => true,
     shutdown: async () => {},
   };
+  const gemini = {
+    process: async () => {
+      calls.push("gemini");
+      return { rawText: "um which version", text: "Which version?", cleanupStatus: "applied" };
+    },
+    check: async () => "ready",
+    shutdown: async () => {},
+  };
   Object.assign(studio, overrides.studio);
   Object.assign(air, overrides.air);
+  Object.assign(gemini, overrides.gemini);
   const instance = createInference({
     userData: "/private/tmp/osw-test",
     config: {
       _deps: {
         air,
         studio,
+        gemini,
+        ...(overrides.now ? { now: overrides.now } : {}),
         validateAudio: async (audio) => audio,
         readRuntime: async () => ({}),
       },
@@ -46,6 +57,191 @@ function fixture(overrides = {}) {
   return { instance, calls };
 }
 const request = { audioPath: "/private/tmp/osw-test/audio.wav", profile: "auto", cleanup: true };
+
+test("Gemini success uses only the cloud and preserves the model's two text versions", async () => {
+  const { instance, calls } = fixture();
+  const result = await instance.processWav({ ...request, profile: "gemini" });
+  assert.deepEqual(calls, ["gemini"]);
+  assert.equal(result.actualProfile, "gemini");
+  assert.equal(result.rawText, "um which version");
+  assert.equal(result.text, "Which version?");
+  assert.equal(result.timings.asrMs, 0);
+  assert.equal(result.timings.cleanupMs, 0);
+  assert.ok(result.timings.geminiMs >= 0);
+  assert.equal(result.fallbackReason, undefined);
+});
+
+test("Gemini keeps intent-focused rephrasing instead of applying the local literal-count guard", async () => {
+  const { instance } = fixture({
+    gemini: {
+      process: async (args) => {
+        assert.equal(args.editingMode, "polished");
+        assert.equal(args.format, "paragraphs");
+        assert.equal(args.style, "chat");
+        assert.deepEqual(args.vocabulary, [{ word: "Quartz", aliases: ["quarts"] }]);
+        return {
+          rawText: "I don't recall the name oh right Quartz can you check the version",
+          text: "Can you check the Quartz version?",
+          cleanupStatus: "applied",
+        };
+      },
+    },
+  });
+  const result = await instance.processWav({
+    ...request,
+    profile: "gemini",
+    style: "chat",
+    format: "paragraphs",
+    vocabulary: [{ word: "Quartz", aliases: ["quarts"] }],
+  });
+  assert.equal(result.text, "Can you check the Quartz version?");
+  assert.equal(result.candidateText, undefined);
+});
+
+test("Gemini receives Exact mode without enabling correction", async () => {
+  const { instance } = fixture({
+    gemini: {
+      process: async (args) => {
+        assert.equal(args.editingMode, "exact");
+        return { rawText: "spoken words", text: "spoken words", cleanupStatus: "off" };
+      },
+    },
+  });
+  const result = await instance.processWav({ ...request, profile: "gemini", cleanup: false });
+  assert.equal(result.text, result.rawText);
+  assert.equal(result.cleanupStatus, "off");
+});
+
+for (const code of ["GEMINI_UNAVAILABLE", "GEMINI_UNCONFIGURED", "TIMEOUT", "INVALID_RESULT"]) {
+  test(`Gemini ${code} falls back once to Studio with sanitized provenance`, async () => {
+    const { instance, calls } = fixture({
+      gemini: {
+        process: async () => {
+          calls.push("gemini");
+          throw Object.assign(new Error("private provider diagnostic"), { code });
+        },
+      },
+    });
+    const result = await instance.processWav({ ...request, profile: "gemini" });
+    assert.deepEqual(calls, ["gemini", "asr", "edit"]);
+    assert.equal(result.actualProfile, "studio");
+    assert.match(result.fallbackReason, /Gemini/);
+    assert.ok(!JSON.stringify(result).includes("private provider diagnostic"));
+  });
+}
+
+test("Gemini then unavailable Studio uses Air with the same recording and preferences", async () => {
+  const seen = [];
+  const { instance, calls } = fixture({
+    gemini: {
+      process: async (args) => {
+        seen.push(args);
+        calls.push("gemini");
+        throw new Error("unavailable");
+      },
+    },
+    studio: {
+      transcribe: async (args) => {
+        seen.push(args);
+        calls.push("asr");
+        throw Object.assign(new Error("offline"), { code: "STUDIO_UNAVAILABLE" });
+      },
+    },
+    air: {
+      process: async (args) => {
+        seen.push(args);
+        calls.push("air");
+        assert.equal(args.editingMode, "clean");
+        assert.equal(args.style, "chat");
+        return airResult;
+      },
+    },
+  });
+  const result = await instance.processWav({
+    ...request,
+    profile: "gemini",
+    editingMode: "clean",
+    style: "chat",
+  });
+  assert.deepEqual(calls, ["gemini", "asr", "air"]);
+  assert.equal(result.actualProfile, "air");
+  assert.match(result.fallbackReason, /Gemini.*Mac Studio/);
+  assert.ok(seen.every((args) => args.audioPath === request.audioPath));
+});
+
+test("failed cloud time is included in total, separate from local recognition and cleanup", async () => {
+  let time = 0;
+  const { instance } = fixture({
+    now: () => time,
+    gemini: {
+      process: async () => {
+        time += 4000;
+        throw new Error("offline");
+      },
+    },
+    studio: {
+      transcribe: async () => {
+        time += 100;
+        return "hello";
+      },
+      edit: async () => {
+        time += 50;
+        return "Hello.";
+      },
+    },
+  });
+  const result = await instance.processWav({ ...request, profile: "gemini" });
+  assert.deepEqual(result.timings, { asrMs: 100, cleanupMs: 50, geminiMs: 4000, totalMs: 4150 });
+});
+
+for (const outcome of ["resolve", "reject"]) {
+  test(`Gemini cancellation discards late ${outcome} without fallback`, async () => {
+    const abort = new AbortController();
+    const { instance, calls } = fixture({
+      gemini: {
+        process: async () => {
+          calls.push("gemini");
+          abort.abort();
+          if (outcome === "reject") throw new Error("late network failure");
+          return { rawText: "late", text: "Late.", cleanupStatus: "applied" };
+        },
+      },
+    });
+    await assert.rejects(
+      instance.processWav({ ...request, profile: "gemini", signal: abort.signal }),
+      { name: "AbortError" }
+    );
+    assert.deepEqual(calls, ["gemini"]);
+  });
+}
+
+test("Gemini text retry uses local Auto, never sends text or retained audio to Gemini", async () => {
+  const { instance, calls } = fixture();
+  const result = await instance.rewrite({ text: "hello", profile: "gemini" });
+  assert.deepEqual(calls, ["edit"]);
+  assert.equal(result.actualProfile, "studio");
+});
+
+test("Gemini check and shutdown share application lifetime", async () => {
+  let signal;
+  let shutdown = false;
+  const { instance } = fixture({
+    gemini: {
+      check: async (args) => {
+        signal = args.signal;
+        return "unconfigured";
+      },
+      shutdown: async () => {
+        shutdown = true;
+      },
+    },
+  });
+  assert.equal(await instance.checkGemini(), "unconfigured");
+  assert.equal(signal.aborted, false);
+  await instance.shutdown();
+  assert.equal(shutdown, true);
+  assert.equal(signal.aborted, true);
+});
 
 test("dictionary reaches ASR/editor and explicit spelling corrections retain raw ASR", async () => {
   const vocabulary = [{ word: "Quartz", aliases: ["quarts"] }];

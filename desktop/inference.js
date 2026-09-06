@@ -6,6 +6,7 @@ const { createHash } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { AirWorkerClient, throwIfAborted } = require("./air-worker-client");
 const { StudioClient } = require("./studio-client");
+const { GeminiClient } = require("./gemini-client");
 const { normalizeVocabulary, applyVocabulary } = require("./vocabulary");
 const { reviewEdit } = require("./edit-review");
 
@@ -163,6 +164,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
       ),
       onProgress,
     });
+  const gemini = deps.gemini || new GeminiClient({ config: config.gemini, onProgress });
 
   async function prepareLocal() {
     if (closed) throw new Error("Application is closing");
@@ -280,10 +282,46 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     cleanup = editingMode !== "exact";
     signal = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     return exclusive(async () => {
-      if (!["auto", "studio", "air"].includes(profile)) throw new Error("Unknown speech profile");
+      if (!["auto", "studio", "air", "gemini"].includes(profile))
+        throw new Error("Unknown speech profile");
       const started = now();
       audioPath = await (deps.validateAudio || validateAudio)(audioPath, userData);
       throwIfAborted(signal);
+      let geminiMs;
+      let cloudFallback;
+      if (profile === "gemini") {
+        const cloudStarted = now();
+        try {
+          onProgress("Turning your recording into text with Gemini");
+          const result = await gemini.process({
+            audioPath,
+            editingMode,
+            style,
+            vocabulary,
+            format,
+            signal,
+          });
+          throwIfAborted(signal);
+          return {
+            ...result,
+            actualProfile: "gemini",
+            // A single multimodal response has no separate ASR/edit measurements.
+            timings: {
+              asrMs: 0,
+              cleanupMs: 0,
+              geminiMs: now() - cloudStarted,
+              totalMs: now() - started,
+            },
+          };
+        } catch (error) {
+          throwIfAborted(signal);
+          if (error.name === "AbortError") throw error;
+          geminiMs = now() - cloudStarted;
+          cloudFallback = "Gemini was unavailable; used local dictation";
+          onProgress("Gemini is unavailable; trying Mac Studio, then this Mac");
+        }
+      }
+      const localStarted = now();
       const local = async (fallbackReason) => {
         onProgress(
           fallbackReason
@@ -306,8 +344,14 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
             ? reviewEdit(result.rawText, result.text, vocabulary)
             : {}),
           actualProfile: "air",
-          ...(fallbackReason ? { fallbackReason } : {}),
-          timings: { ...result.timings, totalMs: now() - started },
+          ...(cloudFallback || fallbackReason
+            ? { fallbackReason: [cloudFallback, fallbackReason].filter(Boolean).join(". ") }
+            : {}),
+          timings: {
+            ...result.timings,
+            ...(geminiMs === undefined ? {} : { geminiMs }),
+            totalMs: now() - started,
+          },
         };
       };
       if (profile === "air") return local();
@@ -316,7 +360,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
         rawText = await studio.transcribe({ audioPath, vocabulary, signal });
       } catch (error) {
         throwIfAborted(signal);
-        if (profile === "auto" && error.code === "STUDIO_UNAVAILABLE")
+        if (["auto", "gemini"].includes(profile) && error.code === "STUDIO_UNAVAILABLE")
           return local("Mac Studio speech recognition was unavailable");
         throw error;
       }
@@ -350,11 +394,13 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
         text,
         actualProfile: "studio",
         cleanupStatus,
+        ...(cloudFallback ? { fallbackReason: cloudFallback } : {}),
         ...(warning ? { warning } : {}),
         ...(cleanupStatus === "applied" ? reviewEdit(rawText, text, vocabulary) : {}),
         timings: {
-          asrMs: afterAsr - started,
+          asrMs: afterAsr - localStarted,
           cleanupMs: finished - afterAsr,
+          ...(geminiMs === undefined ? {} : { geminiMs }),
           totalMs: finished - started,
         },
       };
@@ -372,7 +418,10 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
   }) {
     vocabulary = normalizeVocabulary(vocabulary);
     editingMode = editingOptions(editingMode, true, style, format);
-    if (!["auto", "studio", "air"].includes(profile)) throw new Error("Unknown speech profile");
+    if (!["auto", "studio", "air", "gemini"].includes(profile))
+      throw new Error("Unknown speech profile");
+    // History retries only use the saved text, never re-upload retained audio.
+    if (profile === "gemini") profile = "auto";
     signal = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
     return exclusive(async () => {
       if (typeof text !== "string" || text.length > 32768)
@@ -429,7 +478,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     const timer = child ? setTimeout(() => stopSetupChild(child, "SIGKILL"), 2000) : null;
     timer?.unref();
     try {
-      await Promise.allSettled([air.shutdown(), studio.shutdown(), setupExited]);
+      await Promise.allSettled([air.shutdown(), studio.shutdown(), gemini.shutdown(), setupExited]);
     } finally {
       clearTimeout(timer);
       stopSetupChild(child, "SIGKILL");
@@ -439,6 +488,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     isLocalReady: async () => Boolean(await getRuntime()),
     prepareLocal,
     checkStudio: () => studio.check(),
+    checkGemini: () => gemini.check({ signal: lifetime.signal }),
     processWav,
     rewrite,
     shutdown,

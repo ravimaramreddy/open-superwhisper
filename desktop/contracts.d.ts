@@ -1,4 +1,4 @@
-export type Profile = "auto" | "studio" | "air";
+export type Profile = "auto" | "studio" | "air" | "gemini";
 export type EditingMode = "exact" | "clean" | "polished";
 export type WritingStyle = "neutral" | "chat" | "email";
 export type TextFormat = "prose" | "paragraphs" | "list";
@@ -42,7 +42,7 @@ export interface TextVersion {
   format?: TextFormat;
   edit?: {
     source: "dictation" | "retry" | "accepted";
-    profile: "studio" | "air";
+    profile: "studio" | "air" | "gemini";
     elapsedMs: number;
     fallbackReason?: string;
   };
@@ -52,14 +52,14 @@ export interface Transcript extends TextVersion {
   createdAt: string;
   rawText: string;
   text: string;
-  actualProfile: "studio" | "air";
+  actualProfile: "studio" | "air" | "gemini";
   cleanupStatus: "off" | "applied" | "failed";
   fallbackReason?: string;
   warning?: string;
   candidateText?: string;
   reviewReasons?: string[];
   durationMs: number;
-  timings: { asrMs: number; cleanupMs: number; totalMs: number };
+  timings: { asrMs: number; cleanupMs: number; totalMs: number; geminiMs?: number };
   delivery: "pending" | "dispatched" | "clipboard-only" | "uncertain" | "cancelled";
   targetApp?: { bundleId: string; name: string };
   previousVersion?: TextVersion;
@@ -72,6 +72,7 @@ export interface AppState {
   permissions: Permissions;
   localReady: boolean;
   studio: "unknown" | "ready" | "offline";
+  gemini: "unknown" | "ready" | "offline" | "unconfigured";
   phase: "idle" | "recording" | "processing" | "delivering" | "setup";
   progress: string;
   history: Transcript[];
