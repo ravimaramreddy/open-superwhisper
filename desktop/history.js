@@ -86,6 +86,17 @@ function validRecord(record) {
     typeof record === "object" &&
     validVersion(record) &&
     (record.historyEdited === undefined || typeof record.historyEdited === "boolean") &&
+    (record.audio === undefined ||
+      (record.audio &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          record.id
+        ) &&
+        record.audio.fileName === `${record.id}.wav` &&
+        Number.isSafeInteger(record.audio.bytes) &&
+        record.audio.bytes >= 44 &&
+        record.audio.bytes <= 60 * 1024 * 1024)) &&
+    (record.audioWarning === undefined ||
+      (typeof record.audioWarning === "string" && record.audioWarning.length <= 4000)) &&
     (record.targetApp === undefined || validApp(record.targetApp)) &&
     (record.previousVersion === undefined ||
       (validVersion(record.previousVersion) &&
@@ -202,7 +213,14 @@ class History {
     if (!current) throw new Error("Transcript not found");
     // Rewrites and delivery changes cannot replace original ASR output or identity.
     const allowed = {};
-    for (const key of [...VERSION_KEYS, "delivery", "previousVersion", "historyEdited"])
+    for (const key of [
+      ...VERSION_KEYS,
+      "delivery",
+      "previousVersion",
+      "historyEdited",
+      "audio",
+      "audioWarning",
+    ])
       if (Object.hasOwn(changes, key)) allowed[key] = structuredClone(changes[key]);
     const updated = { ...current, ...allowed };
     if (!validRecord(updated)) throw new Error("Invalid transcript update");

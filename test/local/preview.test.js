@@ -71,3 +71,23 @@ test("preview state emissions, app rule removal and initial undo are functional"
   assert.equal(emissions, 3);
   unsubscribe();
 });
+
+test("preview audio saving needs history and switching off preserves existing clip markers", async () => {
+  const api = createPreviewAPI();
+  const original = await api.getState();
+  assert.equal(original.settings.retainAudio, false);
+  const clip = original.history.find((item) => item.audio);
+  assert(clip);
+  await api.updateSettings({ retainAudio: true });
+  assert.equal((await api.getState()).settings.retainAudio, true);
+  await api.updateSettings({ historyEnabled: false });
+  assert.equal((await api.getState()).settings.retainAudio, false);
+  await api.updateSettings({ retainAudio: true });
+  const disabled = await api.getState();
+  assert.equal(disabled.settings.retainAudio, false);
+  assert.deepEqual(disabled.history.find((item) => item.id === clip.id).audio, clip.audio);
+  await api.openAudioFolder();
+  await api.showRecording(clip.id);
+  await api.updateSettings({ historyEnabled: true });
+  assert.equal((await api.getState()).settings.retainAudio, false);
+});

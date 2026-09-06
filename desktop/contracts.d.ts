@@ -24,6 +24,7 @@ export interface Settings {
   microphoneId: string;
   hotkey: string;
   historyEnabled: boolean;
+  retainAudio: boolean;
   launchAtLogin: boolean;
 }
 export interface Permissions {
@@ -63,6 +64,8 @@ export interface Transcript extends TextVersion {
   targetApp?: { bundleId: string; name: string };
   previousVersion?: TextVersion;
   historyEdited?: boolean;
+  audio?: { fileName: string; bytes: number };
+  audioWarning?: string;
 }
 export interface AppState {
   settings: Settings;
@@ -97,6 +100,8 @@ export interface LocalWhisprAPI {
   undoTranscript(id: string): Promise<Transcript>;
   acceptSuggestion(id: string): Promise<Transcript>;
   deleteTranscript(id: string): Promise<AppState>;
+  openAudioFolder(): Promise<void>;
+  showRecording(id: string): Promise<void>;
   hideWindow(): Promise<void>;
   onState(callback: (state: AppState) => void): () => void;
   onCommand(callback: (command: "toggle" | "cancel") => void): () => void;

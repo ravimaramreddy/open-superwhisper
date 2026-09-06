@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld(
     undoTranscript: (id) => ipcRenderer.invoke("local:undo-transcript", id),
     acceptSuggestion: (id) => ipcRenderer.invoke("local:accept-suggestion", id),
     deleteTranscript: (id) => ipcRenderer.invoke("local:delete-transcript", id),
+    openAudioFolder: () => ipcRenderer.invoke("local:open-audio-folder"),
+    showRecording: (id) => ipcRenderer.invoke("local:show-recording", id),
     hideWindow: () => ipcRenderer.invoke("local:hide-window"),
     onState: (callback) => subscribe("local:state", callback),
     onCommand: (callback) => subscribe("local:command", callback),

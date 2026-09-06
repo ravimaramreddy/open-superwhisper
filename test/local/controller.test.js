@@ -79,6 +79,156 @@ function harness(t, overrides = {}) {
   return { controller, history, calls, directory };
 }
 
+async function submit(controller, audio = wav()) {
+  const session = await controller.beginRecording();
+  return controller.transcribe({ requestId: session.requestId, audio, durationMs: 100 });
+}
+
+test("audio retention is opt-in and history off prevents retention", async (t) => {
+  const { controller, directory } = harness(t, {
+    native: { deliver: async () => ({ delivery: "dispatched" }) },
+  });
+  assert.equal(controller.getState().settings.retainAudio, false);
+  await submit(controller);
+  assert.equal(fs.existsSync(path.join(directory, "retained-audio")), false);
+  await controller.updateSettings({ retainAudio: true });
+  await controller.updateSettings({ historyEnabled: false });
+  assert.equal(controller.getState().settings.retainAudio, false);
+  await controller.updateSettings({ retainAudio: true });
+  assert.equal(controller.getState().settings.retainAudio, false);
+  await submit(controller);
+  assert.equal(fs.existsSync(path.join(directory, "retained-audio")), false);
+  assert.throws(() => normalizeSettings({ retainAudio: "yes" }), /Invalid setting/);
+});
+
+test("retained WAV and initial transcript survive cleanup, restart, edits and History rollover", async (t) => {
+  const { controller, history, calls, directory } = harness(t);
+  history.limit = 1;
+  await controller.updateSettings({ retainAudio: true });
+  const row = await submit(controller);
+  const file = controller.recordingFile(row.id);
+  assert.deepEqual(fs.readFileSync(file), wav());
+  assert.deepEqual(fs.readdirSync(path.join(directory, "recordings")), []);
+  const detailsFile = file.replace(/\.wav$/, ".json");
+  const details = JSON.parse(fs.readFileSync(detailsFile));
+  assert.equal(details.rawText, row.rawText);
+  assert.equal(details.text, row.text);
+  assert.equal(details.status, "transcribed");
+  assert.equal(details.delivery, "dispatched");
+  assert.equal(details.settings.editingMode, "polished");
+  assert.deepEqual(new History(history.file).get(row.id).audio, row.audio);
+  await controller.undoTranscript(row.id);
+  assert.equal(JSON.parse(fs.readFileSync(detailsFile)).text, row.text);
+  const next = await submit(controller);
+  assert.equal(history.get(row.id), null);
+  assert.ok(fs.existsSync(file), "automatic rollover keeps archive");
+  await controller.updateSettings({ retainAudio: false });
+  assert.ok(fs.existsSync(file), "turning off does not delete old audio");
+  await controller.deleteTranscript(next.id);
+  assert.equal(fs.existsSync(path.join(controller.audioDirectory(), next.audio.fileName)), false);
+  assert.equal(fs.existsSync(path.join(controller.audioDirectory(), `${next.id}.json`)), false);
+  assert.equal(calls.delivery.length, 2, "edits/deletion must not replay paste");
+  assert.throws(() => controller.recordingFile("../../settings"), /No saved recording/);
+});
+
+test("retention uses the recording snapshot and deduplicates submitted audio", async (t) => {
+  const { controller, calls } = harness(t);
+  await controller.updateSettings({ retainAudio: true });
+  const session = await controller.beginRecording();
+  await controller.updateSettings({ retainAudio: false });
+  const request = { requestId: session.requestId, audio: wav(), durationMs: 100 };
+  const [first, second] = await Promise.all([
+    controller.transcribe(request),
+    controller.transcribe(request),
+  ]);
+  assert.equal(first.id, second.id);
+  assert.equal(controller.audioArchive.stats().count, 1);
+  assert.equal(calls.delivery.length, 1);
+});
+
+test("archive write failure warns but does not interrupt text or paste", async (t) => {
+  const { controller, calls, history } = harness(t, {
+    controller: {
+      audioArchive: {
+        save() {
+          throw new Error("Storage is full");
+        },
+      },
+    },
+  });
+  await controller.updateSettings({ retainAudio: true });
+  const row = await submit(controller);
+  assert.equal(row.audio, undefined);
+  assert.match(row.audioWarning, /Storage is full/);
+  assert.match(history.get(row.id).audioWarning, /Storage is full/);
+  assert.equal(row.text, modelResult().text);
+  assert.equal(calls.delivery.length, 1);
+});
+
+test("archive annotation failure leaves audio available and dictation successful", async (t) => {
+  const { controller, calls } = harness(t);
+  await controller.updateSettings({ retainAudio: true });
+  controller.audioArchive.annotate = () => {
+    throw new Error("Disk write failed");
+  };
+  const row = await submit(controller);
+  assert.ok(controller.recordingFile(row.id));
+  assert.match(row.audioWarning, /could not be saved/);
+  assert.equal(calls.delivery.length, 1);
+});
+
+test("recognition failures retain diagnostic audio, while silence creates none", async (t) => {
+  const { controller, calls } = harness(t, {
+    inference: {
+      processWav: async () => {
+        throw new Error("Recognition unavailable");
+      },
+    },
+  });
+  await controller.updateSettings({ retainAudio: true });
+  await assert.rejects(submit(controller), /Recognition unavailable/);
+  const root = controller.audioDirectory();
+  const details = fs.readdirSync(root).find((file) => file.endsWith(".json"));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, details))).status, "failed");
+  assert.equal(controller.audioArchive.stats().count, 1);
+  assert.equal(await submit(controller, wav({ silence: true })), null);
+  assert.equal(controller.audioArchive.stats().count, 1);
+  assert.equal(calls.delivery.length, 0);
+});
+
+test("cancelling submitted inference removes saved pair and never pastes", async (t) => {
+  const gate = deferred();
+  const { controller, calls } = harness(t, {
+    inference: {
+      processWav: async () => {
+        await gate.promise;
+        return modelResult();
+      },
+    },
+  });
+  await controller.updateSettings({ retainAudio: true });
+  const pending = submit(controller);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(controller.audioArchive.stats().count, 1);
+  await controller.cancel();
+  gate.resolve();
+  assert.equal(await pending, null);
+  assert.equal(controller.audioArchive.stats().count, 0);
+  assert.equal(calls.delivery.length, 0);
+});
+
+test("failed explicit audio deletion keeps the transcript for retry", async (t) => {
+  const { controller, history } = harness(t);
+  await controller.updateSettings({ retainAudio: true });
+  const row = await submit(controller);
+  controller.audioArchive.remove = () => {
+    throw new Error("Could not remove audio");
+  };
+  await assert.rejects(controller.deleteTranscript(row.id), /Could not remove audio/);
+  assert.ok(history.get(row.id));
+  assert.ok(controller.recordingFile(row.id));
+});
+
 test("old preferences gain dictionary/format defaults and save custom vocabulary across restart", async (t) => {
   const { controller, directory } = harness(t);
   const words = [{ word: "Quartz", aliases: ["quarts"] }];

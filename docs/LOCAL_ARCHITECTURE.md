@@ -79,6 +79,27 @@ The clipboard retains the transcript after dispatch. There is no timed restorati
 a slow target may not consume a posted paste until after an arbitrary delay, and
 a later user copy must never be overwritten by a restoration timer.
 
+## Optional audio archive
+
+`retainAudio` defaults to false and requires `historyEnabled`. Disabling History
+also disables future audio retention; disabling retention does not remove
+existing files. For future submitted, nonsilent dictations, the optional archive
+keeps a local WAV plus a JSON sidecar containing the initial raw/edited transcript,
+effective settings and processing timings. The sidecar is an initial evaluation
+snapshot, not a live copy of later History edits.
+
+The archive lives in private application data, separately from temporary
+processing recordings and the bounded History list. History's automatic 100-row
+rollover does not evict archive files. The archive has a 1 GiB/2,000-clip limit;
+reaching either limit stops new saves and surfaces a warning rather than deleting
+older recordings. Archive errors do not block normal transcription or delivery.
+
+Explicit History deletion removes the associated WAV and JSON pair. Cancellation
+also removes its pair. The renderer can open the archive folder or reveal a clip
+by transcript identifier through the narrow IPC bridge; it does not accept paths
+typed by the user or upload recordings. Folder access remains available with
+retention off, including for archived clips that no longer appear in History.
+
 ## Persistent installation
 
 All runtime state is under `~/Library/Application Support/OpenSuperwhisper`:
@@ -88,6 +109,7 @@ All runtime state is under `~/Library/Application Support/OpenSuperwhisper`:
 - `runtime/.venv`, `runtime/python`, `runtime/ready.json`: app-owned Python runtime.
 - `models/<name>-<revision>`: verified model files and publisher notices.
 - `recordings/`: temporary audio during processing.
+- `retained-audio/`: optional WAV recordings and JSON evaluation snapshots.
 
 The setup script accepts `--seed-qwen` and `--seed-s1` to reuse existing files
 only after their hashes match the pinned manifest. Missing files are downloaded

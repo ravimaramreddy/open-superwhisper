@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { atomicWrite, textVersion, MAX_TEXT } = require("./history");
+const { AudioArchive } = require("./audio-archive");
 const { DEFAULT_VOCABULARY, normalizeVocabulary } = require("./vocabulary");
 const {
   MODES,
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   microphoneId: "default",
   hotkey: "Control+Alt+Space",
   historyEnabled: true,
+  retainAudio: false,
   launchAtLogin: false,
 });
 const MAX_AUDIO_BYTES = 60 * 1024 * 1024;
@@ -48,7 +50,10 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
       next[key] = normalizeVocabulary(value);
       continue;
     }
-    if (["cleanup", "historyEnabled", "launchAtLogin"].includes(key) && typeof value !== "boolean")
+    if (
+      ["cleanup", "historyEnabled", "retainAudio", "launchAtLogin"].includes(key) &&
+      typeof value !== "boolean"
+    )
       throw new Error("Invalid setting value");
     if (key === "microphoneId" && (typeof value !== "string" || value.length > 256))
       throw new Error("Invalid microphone");
@@ -67,6 +72,7 @@ function normalizeSettings(patch, base = DEFAULT_SETTINGS) {
   // Older preferences have only cleanup. A new explicit mode takes precedence.
   if (Object.hasOwn(patch, "editingMode")) next.cleanup = next.editingMode !== "exact";
   else if (Object.hasOwn(patch, "cleanup")) next.editingMode = patch.cleanup ? "polished" : "exact";
+  if (!next.historyEnabled) next.retainAudio = false;
   return next;
 }
 
@@ -167,6 +173,7 @@ class Controller {
     onState = () => {},
     applySettings = async () => {},
     temporaryRoot = path.join(userData, "recordings"),
+    audioArchive = new AudioArchive(userData),
   }) {
     this.userData = userData;
     this.history = history;
@@ -177,6 +184,7 @@ class Controller {
     this.onState = onState;
     this.applySettings = applySettings;
     this.temporaryRoot = temporaryRoot;
+    this.audioArchive = audioArchive;
     this.settingsFile = path.join(userData, "settings.json");
     this.active = null;
     this.completed = new Map();
@@ -339,6 +347,10 @@ class Controller {
 
   async runTranscription(request, audio, suppliedDuration) {
     let directory;
+    let savedAudio;
+    let audioWarning;
+    let archiveStatus = "failed";
+    const createdAt = new Date().toISOString();
     try {
       this.assertOwned(request);
       if (!Number.isFinite(suppliedDuration) || suppliedDuration < 0)
@@ -351,6 +363,25 @@ class Controller {
       this.state.phase = "processing";
       this.state.progress = "Transcribing…";
       this.emit();
+      if (request.settings.historyEnabled && request.settings.retainAudio) {
+        try {
+          savedAudio = this.audioArchive.save(request.id, wav.buffer, {
+            createdAt,
+            status: "processing",
+            durationMs: wav.durationMs,
+            settings: {
+              profile: request.settings.profile,
+              editingMode: request.settings.editingMode,
+              style: request.settings.style,
+              format: request.settings.format,
+              vocabulary: request.settings.vocabulary,
+            },
+            targetApp: request.targetApp,
+          });
+        } catch (error) {
+          audioWarning = `Audio was not saved: ${cleanError(error)}`;
+        }
+      }
       fs.mkdirSync(this.temporaryRoot, { recursive: true, mode: 0o700 });
       directory = fs.mkdtempSync(path.join(this.temporaryRoot, "open-superwhisper-"));
       fs.chmodSync(directory, 0o700);
@@ -378,12 +409,13 @@ class Controller {
       )
         throw new Error("The model returned an invalid transcript");
       if (!result.rawText.trim()) {
+        archiveStatus = "no-speech";
         this.state.progress = "No speech detected";
         return null;
       }
       const record = {
         id: request.id,
-        createdAt: new Date().toISOString(),
+        createdAt,
         rawText: result.rawText,
         text: request.settings.cleanup && result.text.trim() ? result.text : result.rawText,
         actualProfile: result.actualProfile,
@@ -404,6 +436,8 @@ class Controller {
         },
         ...(request.targetApp ? { targetApp: request.targetApp } : {}),
         delivery: "pending",
+        ...(savedAudio ? { audio: savedAudio } : {}),
+        ...(audioWarning ? { audioWarning } : {}),
         ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
         ...(result.candidateText
           ? { candidateText: result.candidateText, reviewReasons: result.reviewReasons }
@@ -414,6 +448,24 @@ class Controller {
             ? { warning: "Cleanup returned no text. The original transcript was kept." }
             : {}),
       };
+      if (savedAudio) {
+        try {
+          // Keep the initial pipeline output for comparisons, independent of later History edits.
+          this.audioArchive.annotate(request.id, {
+            rawText: record.rawText,
+            text: record.text,
+            actualProfile: record.actualProfile,
+            cleanupStatus: record.cleanupStatus,
+            timings: record.timings,
+            candidateText: record.candidateText,
+            reviewReasons: record.reviewReasons,
+          });
+        } catch (error) {
+          audioWarning = `Audio was saved, but transcript details could not be saved: ${cleanError(error)}`;
+          record.audioWarning = audioWarning;
+        }
+      }
+      archiveStatus = "transcribed";
       if (record.text !== record.rawText && !record.candidateText) {
         record.previousVersion = {
           text: record.rawText,
@@ -448,6 +500,7 @@ class Controller {
       return this.state.latest;
     } catch (error) {
       if (request.abort.signal.aborted || error.name === "AbortError") {
+        request.abort.abort();
         const record = this.history.get(request.id);
         if (record && record.delivery !== "dispatched") {
           this.state.latest = this.history.update(request.id, { delivery: "cancelled" });
@@ -459,6 +512,34 @@ class Controller {
       this.state.error = cleanError(error);
       throw error;
     } finally {
+      if (savedAudio) {
+        try {
+          if (request.abort.signal.aborted) {
+            this.audioArchive.remove(request.id);
+            const record = this.history.get(request.id);
+            if (record) this.history.update(request.id, { audio: undefined });
+            if (this.state.latest?.id === request.id) delete this.state.latest.audio;
+          } else {
+            this.audioArchive.annotate(request.id, {
+              status: archiveStatus,
+              delivery: this.history.get(request.id)?.delivery,
+            });
+          }
+        } catch (error) {
+          audioWarning = request.abort.signal.aborted
+            ? `The cancelled recording could not be fully removed. Open saved recordings to remove it: ${cleanError(error)}`
+            : `Audio was saved, but its final status could not be saved: ${cleanError(error)}`;
+        }
+      }
+      if (audioWarning) {
+        this.state.error = [this.state.error, audioWarning].filter(Boolean).join(" ");
+        if (this.state.latest?.id === request.id) this.state.latest.audioWarning = audioWarning;
+        try {
+          if (this.history.get(request.id)) this.history.update(request.id, { audioWarning });
+        } catch {
+          /* Dictation and delivery do not depend on archive warnings being persisted. */
+        }
+      }
       if (directory) {
         try {
           fs.rmSync(directory, { recursive: true, force: true });
@@ -627,11 +708,27 @@ class Controller {
 
   async deleteTranscript(id) {
     this.idleRequired();
+    const record = this.history.get(id);
+    if (!record) throw new Error("Transcript not found");
+    // A failed archive deletion leaves the History entry available to retry.
+    if (record.audio) this.audioArchive.remove(id);
     this.history.delete(id);
     this.completed.delete(id);
     if (this.state.latest?.id === id) this.state.latest = null;
     this.emit();
     return this.getState();
+  }
+
+  audioDirectory() {
+    return this.audioArchive.directory();
+  }
+
+  recordingFile(id) {
+    const record = this.history.get(id);
+    if (!record?.audio) throw new Error("No saved recording for this transcript");
+    const file = this.audioArchive.file(id);
+    if (!file) throw new Error("The saved recording is missing or unavailable");
+    return file;
   }
 }
 
