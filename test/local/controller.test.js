@@ -229,6 +229,48 @@ test("failed explicit audio deletion keeps the transcript for retry", async (t) 
   assert.ok(controller.recordingFile(row.id));
 });
 
+test("cancellation retries incomplete archive rollback without abandoning audio", async (t) => {
+  const gate = deferred();
+  const { controller } = harness(t, {
+    inference: {
+      processWav: async () => {
+        await gate.promise;
+        return modelResult();
+      },
+    },
+  });
+  await controller.updateSettings({ retainAudio: true });
+  const unlink = fs.unlinkSync;
+  const mock = t.mock.method(fs, "unlinkSync", (file) => {
+    if (String(file).includes("retained-audio")) throw new Error("Archive unlink failed");
+    return unlink(file);
+  });
+  const pending = submit(controller);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(fs.readdirSync(controller.audioDirectory()).length > 0);
+  mock.mock.restore();
+  await controller.cancel();
+  gate.resolve();
+  assert.equal(await pending, null);
+  assert.deepEqual(fs.readdirSync(controller.audioDirectory()), []);
+});
+
+test("persistent rollback failure reports possible remaining audio while delivering text", async (t) => {
+  const { controller, calls } = harness(t);
+  await controller.updateSettings({ retainAudio: true });
+  const unlink = fs.unlinkSync;
+  const mock = t.mock.method(fs, "unlinkSync", (file) => {
+    if (String(file).includes("retained-audio")) throw new Error("Archive unlink failed");
+    return unlink(file);
+  });
+  const row = await submit(controller);
+  mock.mock.restore();
+  assert.match(row.audioWarning, /audio may remain/);
+  assert.match(controller.getState().error, /Open saved recordings/);
+  assert.ok(fs.readdirSync(controller.audioDirectory()).length > 0);
+  assert.equal(calls.delivery.length, 1);
+});
+
 test("old preferences gain dictionary/format defaults and save custom vocabulary across restart", async (t) => {
   const { controller, directory } = harness(t);
   const words = [{ word: "Quartz", aliases: ["quarts"] }];

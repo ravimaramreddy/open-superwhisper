@@ -168,7 +168,15 @@ class AudioArchive {
         this.directory();
         const stat = lookup(path.join(this.root, entry.name));
         if (!stat) continue;
-        if (!privateFile(stat))
+        // Finder writes this ordinary metadata file when the user opens the
+        // private archive folder. Count its bytes without reading its contents.
+        const finderMetadata =
+          entry.name === ".DS_Store" &&
+          owned(stat) &&
+          stat.isFile() &&
+          stat.nlink === 1 &&
+          (stat.mode & 0o777) === 0o644;
+        if (!privateFile(stat) && !finderMetadata)
           throw new Error(
             "Retained audio contains an unexpected file; check the folder before saving more"
           );
@@ -192,7 +200,7 @@ class AudioArchive {
     const usage = this.stats();
     if (usage.bytes + bytes > LIMIT_BYTES || (newClip && usage.count >= LIMIT_CLIPS))
       throw new Error(
-        "Retained audio is full (1 GB or 2,000 recordings). Clean up saved audio to retain more; existing recordings are kept."
+        "Retained audio is full (1 GiB or 2,000 recordings). Clean up saved audio to retain more; existing recordings are kept."
       );
   }
 
@@ -218,15 +226,22 @@ class AudioArchive {
   }
 
   cleanup(created) {
-    for (const { file, stat } of created.reverse()) {
+    let complete = true;
+    for (let index = created.length - 1; index >= 0; index--) {
+      const { file, stat } = created[index];
       try {
         this.directory();
         const current = lookup(file);
-        if (current && identity(current, stat)) fs.unlinkSync(file);
+        if (current) {
+          if (identity(current, stat)) fs.unlinkSync(file);
+          else complete = false;
+        }
       } catch {
         // A replacement folder/file is never removed while handling a failure.
+        complete = false;
       }
     }
+    return complete;
   }
 
   save(id, buffer, metadata) {
@@ -257,7 +272,14 @@ class AudioArchive {
       }
       return { fileName: `${id}.wav`, bytes: buffer.length };
     } catch (error) {
-      this.cleanup(created);
+      const cleanupRetainedAudio = () => this.cleanup(created);
+      if (!cleanupRetainedAudio()) {
+        // Main-process only: cancellation/finalization can retry the exact
+        // files created by this attempt without touching later replacements.
+        Object.defineProperty(error, "cleanupRetainedAudio", { value: cleanupRetainedAudio });
+        error.audioMayRemain = true;
+        error.message += " Audio may remain; open saved recordings to review it.";
+      }
       throw error;
     }
   }

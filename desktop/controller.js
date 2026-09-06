@@ -349,6 +349,8 @@ class Controller {
     let directory;
     let savedAudio;
     let audioWarning;
+    let archiveCleanup;
+    let archiveSaveError;
     let archiveStatus = "failed";
     const createdAt = new Date().toISOString();
     try {
@@ -379,7 +381,11 @@ class Controller {
             targetApp: request.targetApp,
           });
         } catch (error) {
-          audioWarning = `Audio was not saved: ${cleanError(error)}`;
+          archiveSaveError = cleanError(error);
+          if (typeof error.cleanupRetainedAudio === "function") {
+            archiveCleanup = error.cleanupRetainedAudio;
+            audioWarning = `Some audio may remain after a failed save. Open saved recordings to remove partial files: ${archiveSaveError}`;
+          } else audioWarning = `Audio was not saved: ${archiveSaveError}`;
         }
       }
       fs.mkdirSync(this.temporaryRoot, { recursive: true, mode: 0o700 });
@@ -512,6 +518,11 @@ class Controller {
       this.state.error = cleanError(error);
       throw error;
     } finally {
+      if (archiveCleanup) {
+        // Retry only entries whose identities were captured by this failed save.
+        // In particular, cancellation must not abandon a partially published WAV.
+        if (archiveCleanup()) audioWarning = `Audio was not saved: ${archiveSaveError}`;
+      }
       if (savedAudio) {
         try {
           if (request.abort.signal.aborted) {

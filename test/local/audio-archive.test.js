@@ -290,3 +290,125 @@ test("opening retained audio verifies the bounded WAV contents", (t) => {
   fs.writeFileSync(path.join(root, `${id}.wav`), "invalid replacement");
   assert.equal(archive.file(id), null);
 });
+
+test("Finder metadata permits future saves and annotations while its bytes count toward the cap", (t) => {
+  const { archive, root } = fixture(t);
+  archive.directory();
+  const finderFile = path.join(root, ".DS_Store");
+  const finderBytes = Buffer.from("Synthetic Finder folder metadata");
+  fs.writeFileSync(finderFile, finderBytes, { mode: 0o644 });
+  fs.chmodSync(finderFile, 0o644);
+  assert.deepEqual(archive.stats(), {
+    count: 0,
+    bytes: finderBytes.length,
+    limitBytes: LIMIT_BYTES,
+  });
+  const id = randomUUID();
+  archive.save(id, wav(), metadata());
+  archive.annotate(id, { status: "completed", rawText: "synthetic text", text: "Synthetic text." });
+  const expectedBytes =
+    finderBytes.length + wav().length + fs.statSync(path.join(root, `${id}.json`)).size;
+  assert.deepEqual(archive.stats(), { count: 1, bytes: expectedBytes, limitBytes: LIMIT_BYTES });
+  const descriptor = fs.openSync(finderFile, "r+");
+  fs.ftruncateSync(descriptor, LIMIT_BYTES - expectedBytes + finderBytes.length);
+  fs.closeSync(descriptor);
+  assert.equal(archive.stats().bytes, LIMIT_BYTES);
+  assert.throws(() => archive.save(randomUUID(), wav(), metadata()), /1 GiB/);
+  assert.ok(archive.file(id));
+});
+
+test("Finder metadata exception does not admit links, directories or public recording files", (t) => {
+  const { archive, root, parent } = fixture(t);
+  archive.directory();
+  const outside = path.join(parent, "finder-target");
+  fs.writeFileSync(outside, "untouched", { mode: 0o644 });
+  const finderFile = path.join(root, ".DS_Store");
+  fs.symlinkSync(outside, finderFile);
+  assert.throws(() => archive.stats(), /unexpected file/);
+  fs.unlinkSync(finderFile);
+  fs.linkSync(outside, finderFile);
+  assert.throws(() => archive.stats(), /unexpected file/);
+  fs.unlinkSync(finderFile);
+  fs.mkdirSync(finderFile, { mode: 0o700 });
+  assert.throws(() => archive.stats(), /unexpected file/);
+  fs.rmdirSync(finderFile);
+  const publicWav = path.join(root, `${randomUUID()}.wav`);
+  fs.writeFileSync(publicWav, wav(), { mode: 0o644 });
+  fs.chmodSync(publicWav, 0o644);
+  assert.throws(() => archive.stats(), /unexpected file/);
+  assert.equal(fs.readFileSync(outside, "utf8"), "untouched");
+});
+
+test("failed rollback exposes an exact-file retry that preserves collision files", (t) => {
+  const { archive, root } = fixture(t);
+  const id = randomUUID(),
+    link = fs.linkSync,
+    unlink = fs.unlinkSync;
+  const collisionFile = path.join(root, `${id}.json`);
+  let rollingBack = false;
+  t.mock.method(fs, "linkSync", (source, destination) => {
+    if (destination === collisionFile) {
+      fs.writeFileSync(destination, "collision details", { mode: 0o600 });
+      rollingBack = true;
+    }
+    return link(source, destination);
+  });
+  const unlinkFault = t.mock.method(fs, "unlinkSync", (file) => {
+    if (rollingBack) throw Object.assign(new Error("cleanup I/O failed"), { code: "EIO" });
+    return unlink(file);
+  });
+  let failure;
+  assert.throws(
+    () => archive.save(id, wav(), metadata()),
+    (error) => {
+      failure = error;
+      assert.equal(error.code, "EEXIST");
+      assert.equal(error.audioMayRemain, true);
+      assert.equal(typeof error.cleanupRetainedAudio, "function");
+      assert.equal(Object.keys(error).includes("cleanupRetainedAudio"), false);
+      assert.match(error.message, /Audio may remain/);
+      return true;
+    }
+  );
+  assert.equal(fs.existsSync(path.join(root, `${id}.wav`)), true);
+  assert.equal(
+    fs.readdirSync(root).some((entry) => entry.endsWith(".tmp")),
+    true
+  );
+  assert.equal(failure.cleanupRetainedAudio(), false);
+  unlinkFault.mock.restore();
+  assert.equal(failure.cleanupRetainedAudio(), true);
+  assert.equal(failure.cleanupRetainedAudio(), true);
+  assert.deepEqual(fs.readdirSync(root), [`${id}.json`]);
+  assert.equal(fs.readFileSync(collisionFile, "utf8"), "collision details");
+});
+
+test("rollback retries retain original ordering and never unlink replacement inodes", (t) => {
+  const { archive, root } = fixture(t);
+  archive.directory();
+  const original = path.join(root, "original.tmp"),
+    other = path.join(root, "other.tmp");
+  fs.writeFileSync(original, "original", { mode: 0o600 });
+  fs.writeFileSync(other, "other", { mode: 0o600 });
+  const created = [
+    { file: original, stat: fs.lstatSync(original) },
+    { file: other, stat: fs.lstatSync(other) },
+  ];
+  const order = created.map((entry) => entry.file);
+  // Keep the original inode alive so the filesystem cannot immediately recycle it.
+  const held = fs.openSync(original, "r");
+  try {
+    fs.unlinkSync(original);
+    fs.writeFileSync(original, "replacement", { mode: 0o600 });
+    assert.equal(archive.cleanup(created), false);
+    assert.deepEqual(
+      created.map((entry) => entry.file),
+      order
+    );
+    assert.equal(fs.existsSync(other), false);
+    assert.equal(archive.cleanup(created), false);
+    assert.equal(fs.readFileSync(original, "utf8"), "replacement");
+  } finally {
+    fs.closeSync(held);
+  }
+});
