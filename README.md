@@ -155,7 +155,7 @@ multipart `file`, optional `vocab` (comma-separated preferred spellings), and
 returning `text`. This personal build expects the existing
 LM Studio installation and `google/gemma-4-26b-a4b` model on Studio. The app loads an
 instance with its own unique identifier, disables reasoning for editing, gives
-it a one-hour idle lifetime, and unloads only its own instance when closing.
+it a thirty-minute idle lifetime, starts loading it when a Studio recording begins, and unloads only its own instance when closing.
 
 ## Originals and privacy
 

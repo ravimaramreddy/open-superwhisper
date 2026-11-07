@@ -254,6 +254,41 @@ test("Studio uses private forwards, owned instance, and reasoning off", async ()
   assert.ok(!calls.at(-1).at(-1).includes("someone-elses-model"));
 });
 
+test("Studio warm starts one quiet editor load that a later edit reuses", async () => {
+  const progress = [],
+    commands = [];
+  let finishLoad;
+  const client = new StudioClient({
+    prompts: { cleanup: "clean" },
+    onProgress: (message) => progress.push(message),
+  });
+  client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
+  client.command = (args) => {
+    commands.push(args[0]);
+    return args[0] === "load"
+      ? new Promise((resolve) => (finishLoad = resolve))
+      : Promise.resolve();
+  };
+  client.json = async (url) =>
+    url.endsWith("/models")
+      ? { models: [] }
+      : { output: [{ type: "message", content: "Edited." }], stats: { total_output_tokens: 1 } };
+  try {
+    client.warm();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(commands, ["load"]);
+    assert.deepEqual(progress, []);
+    const edited = client.edit({ text: "raw" });
+    await new Promise((resolve) => setImmediate(resolve));
+    finishLoad();
+    assert.equal(await edited, "Edited.");
+    assert.deepEqual(commands, ["load"]);
+    assert.ok(progress.includes("Loading Mac Studio correction"));
+  } finally {
+    await client.shutdown();
+  }
+});
+
 test("Studio accepts complete correction longer than 512 tokens", async () => {
   const client = new StudioClient({ prompts: { cleanup: "clean" } });
   client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
