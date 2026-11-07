@@ -153,9 +153,9 @@ Keep this file out of version control. The speech service must provide
 `GET /health` with `status: "healthy"` and `POST /transcribe` accepting a WAV
 multipart `file`, optional `vocab` (comma-separated preferred spellings), and
 returning `text`. This personal build expects the existing
-LM Studio installation and `google/gemma-4-e4b` model on Studio. The app loads an
+LM Studio installation and `google/gemma-4-26b-a4b` model on Studio. The app loads an
 instance with its own unique identifier, disables reasoning for editing, gives
-it a five-minute idle lifetime, and unloads only its own instance when closing.
+it a one-hour idle lifetime, and unloads only its own instance when closing.
 
 ## Originals and privacy
 
