@@ -243,7 +243,7 @@ test("Studio uses private forwards, owned instance, and reasoning off", async ()
   assert.ok(calls[0].includes("127.0.0.1:24001:127.0.0.1:8766"));
   assert.ok(calls[0].includes("127.0.0.1:24002:127.0.0.1:1234"));
   const body = JSON.parse(requests.find((request) => request.url.endsWith("/chat")).options.body);
-  assert.match(body.model, /^open-superwhisper-e4b-/);
+  assert.match(body.model, /^open-superwhisper-26b-/);
   assert.equal(body.reasoning, "off");
   assert.equal(body.store, false);
   assert.equal(body.temperature, 0);

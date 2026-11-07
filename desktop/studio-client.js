@@ -53,7 +53,7 @@ class StudioClient {
     if (!/^[A-Za-z0-9_][A-Za-z0-9_.@:-]*$/.test(target))
       throw new Error("Invalid Studio SSH target");
     Object.assign(this, { target, prompts, onProgress, spawnImpl, fetchImpl, portImpl, sleepImpl });
-    this.instance = `open-superwhisper-e4b-${randomUUID().slice(0, 8)}`;
+    this.instance = `open-superwhisper-26b-${randomUUID().slice(0, 8)}`;
     this.tunnel = null;
     this.connecting = null;
     this.loading = null;
@@ -285,7 +285,7 @@ class StudioClient {
       await this.command(
         [
           "load",
-          "google/gemma-4-e4b",
+          "google/gemma-4-26b-a4b",
           "--identifier",
           this.instance,
           "--context-length",
@@ -293,7 +293,7 @@ class StudioClient {
           "--gpu",
           "max",
           "--ttl",
-          "300",
+          "3600",
           "--yes",
         ],
         120000,
