@@ -325,6 +325,12 @@ class Controller {
       };
       request.targetApp = validApp(app) ? app : undefined;
       request.settings = effectiveSettings(request.settings, request.targetApp);
+      // Load the Studio editor while the user speaks; it never blocks recording.
+      if (
+        ["studio", "auto"].includes(request.settings.profile) &&
+        request.settings.editingMode !== "exact"
+      )
+        this.inference.warmStudio?.();
       return { requestId: request.id, settings: structuredClone(request.settings) };
     } catch (error) {
       if (this.active === request) {

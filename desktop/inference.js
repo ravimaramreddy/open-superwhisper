@@ -496,6 +496,7 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     isLocalReady: async () => Boolean(await getRuntime()),
     prepareLocal,
     checkStudio: () => studio.check(),
+    warmStudio: () => studio.warm(),
     checkGemini: () => gemini.check({ signal: lifetime.signal }),
     processWav,
     rewrite,

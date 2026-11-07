@@ -271,16 +271,29 @@ class StudioClient {
     });
   }
 
-  async ensureEditor(tunnel, signal) {
+  // Start loading the editor while the user is still speaking, so the first
+  // dictation after an idle period waits less. Failures are ignored here;
+  // edit() reports them if they still apply when the text is ready.
+  warm() {
+    if (this.closed) return;
+    this.connect()
+      .then((tunnel) => this.ensureEditor(tunnel, this.lifetime.signal, { quiet: true }))
+      .catch(() => {});
+  }
+
+  async ensureEditor(tunnel, signal, { quiet = false } = {}) {
     if (this.closed) throw new Error("Studio connection has shut down");
-    if (this.loading) return this.loading;
+    if (this.loading) {
+      if (!quiet) this.onProgress("Loading Mac Studio correction");
+      return this.loading;
+    }
     this.loading = (async () => {
       const catalog = await this.json(`${tunnel.editor}/api/v1/models`, { signal });
       const found = catalog.models?.some((model) =>
         model.loaded_instances?.some((item) => item.id === this.instance)
       );
       if (found) return;
-      this.onProgress("Loading Mac Studio correction");
+      if (!quiet) this.onProgress("Loading Mac Studio correction");
       this.ownLoadAttempted = true;
       await this.command(
         [
@@ -293,7 +306,7 @@ class StudioClient {
           "--gpu",
           "max",
           "--ttl",
-          "3600",
+          "1800",
           "--yes",
         ],
         120000,
