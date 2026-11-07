@@ -316,16 +316,30 @@ test("auto falls back only for unavailable Studio ASR", async () => {
   assert.deepEqual(invalid.calls, []);
 });
 
-test("forced profiles do not silently select another machine", async () => {
-  const failed = fixture({
-    studio: {
-      transcribe: async () => {
-        throw Object.assign(new Error("offline"), { code: "STUDIO_UNAVAILABLE" });
+test("unavailable Studio falls back to Gemini, then this Mac; This Mac stays local", async () => {
+  const offline = {
+    transcribe: async () => {
+      throw Object.assign(new Error("offline"), { code: "STUDIO_UNAVAILABLE" });
+    },
+  };
+  const cloud = fixture({ studio: offline });
+  const viaGemini = await cloud.instance.processWav({ ...request, profile: "studio" });
+  assert.deepEqual(cloud.calls, ["gemini"]);
+  assert.equal(viaGemini.actualProfile, "gemini");
+  assert.match(viaGemini.fallbackReason, /Mac Studio.*Gemini/);
+  const noCloud = fixture({
+    studio: offline,
+    gemini: {
+      process: async () => {
+        noCloud.calls.push("gemini");
+        throw new Error("no network");
       },
     },
   });
-  await assert.rejects(failed.instance.processWav({ ...request, profile: "studio" }), /offline/);
-  assert.deepEqual(failed.calls, []);
+  const viaAir = await noCloud.instance.processWav({ ...request, profile: "studio" });
+  assert.deepEqual(noCloud.calls, ["gemini", "air"]);
+  assert.equal(viaAir.actualProfile, "air");
+  assert.match(viaAir.fallbackReason, /Gemini.*Mac Studio/);
   const local = fixture();
   await local.instance.processWav({ ...request, profile: "air" });
   assert.deepEqual(local.calls, ["air"]);
