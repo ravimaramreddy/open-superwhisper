@@ -306,7 +306,7 @@ class StudioClient {
           "--gpu",
           "max",
           "--ttl",
-          "1800",
+          "900",
           "--yes",
         ],
         120000,
