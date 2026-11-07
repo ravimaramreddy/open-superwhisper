@@ -16,7 +16,8 @@ const en = {
   air: "This Mac",
   auto: "Automatic",
   automaticDetail: "Studio first. This Mac takes over when needed.",
-  studioDetail: "Use your Mac Studio.",
+  studioDetail:
+    "Use your Mac Studio. If it is unavailable, the audio goes to Gemini, then to this Mac.",
   airDetail: "Keep this dictation on this Mac.",
   geminiDetail:
     "Audio is sent to Google Cloud. If Gemini is unavailable, processing automatically falls back to your Macs.",

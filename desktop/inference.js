@@ -297,10 +297,11 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
       throwIfAborted(signal);
       let geminiMs;
       let cloudFallback;
-      if (profile === "gemini") {
+      // Returns Gemini's result, or null after recording why it was unavailable.
+      const cloud = async (progress) => {
         const cloudStarted = now();
         try {
-          onProgress("Turning your recording into text with Gemini");
+          onProgress(progress);
           const result = await gemini.process({
             audioPath,
             editingMode,
@@ -326,8 +327,13 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
           if (error.name === "AbortError") throw error;
           geminiMs = now() - cloudStarted;
           cloudFallback = "Gemini was unavailable; used local dictation";
-          onProgress("Gemini is unavailable; trying Mac Studio, then this Mac");
+          return null;
         }
+      };
+      if (profile === "gemini") {
+        const result = await cloud("Turning your recording into text with Gemini");
+        if (result) return result;
+        onProgress("Gemini is unavailable; trying Mac Studio, then this Mac");
       }
       const localStarted = now();
       const local = async (fallbackReason) => {
@@ -368,9 +374,14 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
         rawText = await studio.transcribe({ audioPath, vocabulary, signal });
       } catch (error) {
         throwIfAborted(signal);
-        if (["auto", "gemini"].includes(profile) && error.code === "STUDIO_UNAVAILABLE")
-          return local("Mac Studio speech recognition was unavailable");
-        throw error;
+        if (error.code !== "STUDIO_UNAVAILABLE") throw error;
+        // Studio falls back to Gemini, then this Mac as the last, offline backup.
+        if (profile === "studio") {
+          const result = await cloud("Mac Studio is unavailable; using Gemini");
+          if (result)
+            return { ...result, fallbackReason: "Mac Studio was unavailable; used Gemini" };
+        }
+        return local("Mac Studio speech recognition was unavailable");
       }
       throwIfAborted(signal);
       const afterAsr = now();

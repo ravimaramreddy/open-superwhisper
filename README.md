@@ -9,12 +9,12 @@ Press **Escape** to cancel. Recordings stop after five minutes.
 | --------- | ---------------------------------------------------------- | -------------------------------------- |
 | Gemini    | Gemini 3.8 Flash through Google Cloud                      | Audio and polished text in one request |
 | Automatic | Mac Studio first; this Mac if Studio speech is unavailable | Uses the matching machine              |
-| Studio    | Qwen3-ASR 1.7B, 8-bit                                      | Gemma 4 E4B through LM Studio          |
+| Studio    | Qwen3-ASR 1.7B, 8-bit; Gemini, then this Mac if unavailable | Gemma 4 26B-A4B through LM Studio      |
 | This Mac  | Qwen3-ASR 1.7B, 8-bit through MLX                          | S1-mini by Superwhisper, BF16          |
 
 Automatic mode falls back when Studio speech is unavailable. A correction failure
-keeps the original transcript and shows a warning. Choosing Studio explicitly does
-not silently switch machines. **Retry from original** uses the current processing
+keeps the original transcript and shows a warning. When Studio speech is
+unavailable, Studio uses Gemini, then this Mac as the last, offline backup. **Retry from original** uses the current processing
 choice and editing settings, without recording or pasting again. Automatic retries
 can use this Mac when Studio's editor connection is unavailable; a failed or
 invalid edit preserves the previous version.
