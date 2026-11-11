@@ -222,7 +222,9 @@ test("retained WAV and initial transcript survive cleanup, restart, edits and Hi
   assert.equal(details.settings.editingMode, "polished");
   assert.deepEqual(new History(history.file).get(row.id).audio, row.audio);
   await controller.undoTranscript(row.id);
-  assert.equal(JSON.parse(fs.readFileSync(detailsFile)).text, row.text);
+  const edited = JSON.parse(fs.readFileSync(detailsFile));
+  assert.equal(edited.text, row.text, "the initial snapshot is never overwritten");
+  assert.equal(edited.edited.text, row.rawText, "a later edit is kept beside it");
   const next = await submit(controller);
   assert.equal(history.get(row.id), null);
   assert.ok(fs.existsSync(file), "automatic rollover keeps archive");

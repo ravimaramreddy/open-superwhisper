@@ -3,8 +3,13 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { maxRecordingSeconds } = require("../local-runtime/recording-limits.json");
 
-const LIMIT_BYTES = 1024 * 1024 * 1024;
-const LIMIT_CLIPS = 2000;
+// The archive is the durable training set, so the limits are only a runaway-disk guard
+// (about 20 months at ~33 clips/day).
+// ponytail: stats() rescans the folder on every save (~60 ms per 2,000 clips); keep a
+// running total if that gets slow.
+const LIMIT_BYTES = 16 * 1024 * 1024 * 1024;
+const LIMIT_CLIPS = 20000;
+const LIMIT_TEXT = `${LIMIT_BYTES / 1024 ** 3} GiB or ${LIMIT_CLIPS.toLocaleString("en-US")} recordings`;
 const MAX_METADATA_BYTES = 1024 * 1024;
 const MAX_ENTRIES = LIMIT_CLIPS * 4 + 32;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -203,7 +208,7 @@ class AudioArchive {
     const usage = this.stats();
     if (usage.bytes + bytes > LIMIT_BYTES || (newClip && usage.count >= LIMIT_CLIPS))
       throw new Error(
-        "Retained audio is full (1 GiB or 2,000 recordings). Clean up saved audio to retain more; existing recordings are kept."
+        `Retained audio is full (${LIMIT_TEXT}). Clean up saved audio to retain more; existing recordings are kept.`
       );
   }
 

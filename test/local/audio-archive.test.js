@@ -176,13 +176,13 @@ test("capacity includes partial and unknown files and never evicts retained audi
   assert.equal(archive.stats().count, 0);
 });
 
-test("2,000 partial clip IDs reach the clip limit without deleting any", (t) => {
+test("20,000 partial clip IDs reach the clip limit without deleting any", (t) => {
   const { archive, root } = fixture(t);
   archive.directory();
   for (let i = 0; i < LIMIT_CLIPS; i++)
     fs.writeFileSync(path.join(root, `${randomUUID()}.json`), "{}", { mode: 0o600 });
   assert.equal(archive.stats().count, LIMIT_CLIPS);
-  assert.throws(() => archive.save(randomUUID(), wav(), metadata()), /2,000/);
+  assert.throws(() => archive.save(randomUUID(), wav(), metadata()), /20,000/);
   assert.equal(fs.readdirSync(root).length, LIMIT_CLIPS);
 });
 
@@ -313,7 +313,7 @@ test("Finder metadata permits future saves and annotations while its bytes count
   fs.ftruncateSync(descriptor, LIMIT_BYTES - expectedBytes + finderBytes.length);
   fs.closeSync(descriptor);
   assert.equal(archive.stats().bytes, LIMIT_BYTES);
-  assert.throws(() => archive.save(randomUUID(), wav(), metadata()), /1 GiB/);
+  assert.throws(() => archive.save(randomUUID(), wav(), metadata()), /16 GiB/);
   assert.ok(archive.file(id));
 });
 

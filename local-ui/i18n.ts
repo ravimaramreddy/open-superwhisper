@@ -237,7 +237,7 @@ const en = {
   retainAudioDetail:
     "Save audio and transcript copies on this Mac. Delete dictation + recording removes both. Older clips stay when History reaches 100 entries. Turning this off stops future saving only.",
   savedRecordings: "Saved recordings",
-  audioArchiveDetail: "Saving stops at 1 GiB or 2,000 clips. Nothing is deleted automatically.",
+  audioArchiveDetail: "Saving stops at 16 GiB or 20,000 clips. Nothing is deleted automatically.",
   audioNeedsHistory:
     "Turn on dictation history to save future audio. Existing recordings remain available.",
   openAudioFolder: "Open saved recordings",

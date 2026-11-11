@@ -208,7 +208,7 @@ later comparison. Later History edits do not replace that initial snapshot.
   rollover leaves older audio and transcript files available.
 - Turning audio saving off stops future saves; existing files remain. Turning
   History off also disables future audio saving.
-- Saving stops at **1 GiB or 2,000 clips**, with a visible warning. No older
+- Saving stops at **16 GiB or 20,000 clips**, with a visible warning. No older
   recordings are automatically deleted to make space.
 - **Delete dictation + recording** in History removes that entry and its linked
   WAV/JSON pair. Cancelling a dictation also removes its pair. Older archived

@@ -686,6 +686,7 @@ class Controller {
         previousVersion: textVersion(record),
         historyEdited: true,
       });
+      this.archiveEdit(updated);
       if (this.state.latest?.id === id) this.state.latest = updated;
       return updated;
     } catch (error) {
@@ -702,6 +703,19 @@ class Controller {
     }
   }
 
+  // Later History edits go beside the initial snapshot, never over it: the pair
+  // (initial text, edited text) is what a cleanup model trains on.
+  archiveEdit(record) {
+    if (!record.audio) return;
+    try {
+      this.audioArchive.annotate(record.id, {
+        edited: { at: new Date().toISOString(), ...textVersion(record) },
+      });
+    } catch (error) {
+      this.state.error = `The edit was saved, but the saved recording's details were not updated: ${cleanError(error)}`;
+    }
+  }
+
   async undoTranscript(id) {
     this.idleRequired();
     const record = this.history.get(id);
@@ -711,6 +725,7 @@ class Controller {
       previousVersion: undefined,
       historyEdited: true,
     });
+    this.archiveEdit(updated);
     if (this.state.latest?.id === id) this.state.latest = updated;
     this.emit();
     return updated;
@@ -734,6 +749,7 @@ class Controller {
         elapsedMs: record.edit?.elapsedMs || record.timings.cleanupMs,
       },
     });
+    this.archiveEdit(updated);
     if (this.state.latest?.id === id) this.state.latest = updated;
     this.emit();
     return updated;

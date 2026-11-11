@@ -86,11 +86,12 @@ also disables future audio retention; disabling retention does not remove
 existing files. For future submitted, nonsilent dictations, the optional archive
 keeps a local WAV plus a JSON sidecar containing the initial raw/edited transcript,
 effective settings and processing timings. The sidecar is an initial evaluation
-snapshot, not a live copy of later History edits.
+snapshot; a later History edit (retry, accepted suggestion, undo) is added under
+`edited` and never replaces the snapshot.
 
 The archive lives in private application data, separately from temporary
 processing recordings and the bounded History list. History's automatic 100-row
-rollover does not evict archive files. The archive has a 1 GiB/2,000-clip limit;
+rollover does not evict archive files. The archive has a 16 GiB/20,000-clip limit;
 reaching either limit stops new saves and surfaces a warning rather than deleting
 older recordings. Archive errors do not block normal transcription or delivery.
 
