@@ -117,11 +117,16 @@ only after their hashes match the pinned manifest. Missing files are downloaded
 from the exact checkpoint revision. No model inference runs during installation.
 Changing the lock invalidates readiness and requires setup again.
 
-Studio speech and LM Studio remain independently managed. Only the app's tunnel
-and unique editing instance are app-owned. The Studio CLI is resolved from
-`$HOME/.lmstudio/bin/lms` on the remote host, using the authenticated SSH user's
-home directory. Remote cancellation stops accepting results; an existing remote
-service may finish computation after its client disconnects.
+Studio speech and the dictation gateway remain independently managed. Only the
+app's tunnel is app-owned: the gateway loads and unloads its model by itself.
+The gateway key comes from the vault once per app run; `dictation-gateway-key.bin`
+in the app-data folder is its encrypted copy for a vault that is away. With
+`"studioText": { "backend": "lmstudio" }` in `machine.json` the app uses LM
+Studio as before: its unique editing instance is then app-owned too, and the
+Studio CLI is resolved from `$HOME/.lmstudio/bin/lms` on the remote host, using
+the authenticated SSH user's home directory. Remote cancellation stops accepting
+results; an existing remote service may finish computation after its client
+disconnects.
 
 ## Packaging boundaries
 

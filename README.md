@@ -9,7 +9,7 @@ Press **Escape** to cancel. Recordings stop after five minutes.
 | --------- | ---------------------------------------------------------- | -------------------------------------- |
 | Gemini    | Gemini 3.8 Flash through Google Cloud                      | Audio and polished text in one request |
 | Automatic | Mac Studio first; this Mac if Studio speech is unavailable | Uses the matching machine              |
-| Studio    | Qwen3-ASR 1.7B, 8-bit; Gemini, then this Mac if unavailable | Gemma 4 26B-A4B through LM Studio      |
+| Studio    | Qwen3-ASR 1.7B, 8-bit; Gemini, then this Mac if unavailable | Gemma 4 26B-A4B through the gateway    |
 | This Mac  | Qwen3-ASR 1.7B, 8-bit through MLX                          | S1-mini by Superwhisper, BF16          |
 
 Automatic mode falls back when Studio speech is unavailable. A correction failure
@@ -138,8 +138,8 @@ dictation usable. A billing pin is not a spending cap.
 ## Studio connection
 
 Studio uses existing services over a private SSH connection. The app opens
-loopback-only forwards to the remote speech service on port 8766 and LM Studio
-on port 1234. It does not deploy or reconfigure those services.
+loopback-only forwards to the remote speech service on port 8766 and to the
+dictation gateway on port 8640. It does not deploy or reconfigure those services.
 
 The default SSH target is `mac-studio`; noninteractive SSH authentication must
 already work. A private override can be placed in
@@ -152,10 +152,29 @@ already work. A private override can be placed in
 Keep this file out of version control. The speech service must provide
 `GET /health` with `status: "healthy"` and `POST /transcribe` accepting a WAV
 multipart `file`, optional `vocab` (comma-separated preferred spellings), and
-returning `text`. This personal build expects the existing
-LM Studio installation and `google/gemma-4-26b-a4b` model on Studio. The app loads an
-instance with its own unique identifier, disables reasoning for editing, gives
-it a fifteen-minute idle lifetime, starts loading it when a Studio recording begins, and unloads only its own instance when closing.
+returning `text`.
+
+Text cleanup uses the owner's dictation gateway on Studio: an OpenAI-style
+`POST /v1/chat/completions` with the model alias `dictation` (Gemma 4 26B-A4B),
+reasoning off. The gateway loads and unloads its model by itself; the app sends
+one small request when a Studio recording begins, so the model is ready when the
+text arrives. The gateway key is read from the private vault with the `creds`
+command once per app run and kept in memory. An encrypted copy (Electron
+`safeStorage`) in the app-data folder is used only when the vault is away. A
+missing or refused key is a plain correction failure: the original transcript is
+kept, and no other machine or cloud receives the text.
+
+The way back to LM Studio is one line in `machine.json`:
+
+```json
+{ "studioText": { "backend": "lmstudio" } }
+```
+
+On that path the app expects the LM Studio installation and
+`google/gemma-4-26b-a4b` model on Studio, loads an instance with its own unique
+identifier, disables reasoning for editing, gives it a fifteen-minute idle
+lifetime, and unloads only its own instance when closing. `studioText` also
+accepts `port` and `model` for another gateway port or alias.
 
 ## Originals and privacy
 
