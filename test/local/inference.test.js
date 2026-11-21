@@ -717,6 +717,112 @@ test("Auto text retry falls back only when Studio is unavailable", async () => {
   }
 });
 
+// The real Studio client on its gateway path, behind the real routing. Only the tunnel, the
+// HTTP answers and the key are fakes.
+function gatewayStudio({ chat, key = async () => "test-key" }) {
+  const { EventEmitter } = require("node:events");
+  const { PassThrough } = require("node:stream");
+  const { StudioClient } = require("../../desktop/studio-client");
+  let port = 24000;
+  const sent = [];
+  const client = new StudioClient({
+    prompts: { cleanup: "clean" },
+    keyImpl: key,
+    portImpl: async () => ++port,
+    sleepImpl: async () => {},
+    spawnImpl: () => {
+      const child = new EventEmitter();
+      child.stderr = new PassThrough();
+      child.kill = () => queueMicrotask(() => child.emit("close", null));
+      return child;
+    },
+    fetchImpl: async (url, options) => {
+      if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "healthy" }) };
+      sent.push(url);
+      return chat(options);
+    },
+  });
+  return {
+    sent,
+    studio: { edit: (params) => client.edit(params), shutdown: () => client.shutdown() },
+  };
+}
+
+test("a gateway key problem or refusal keeps the text on the Studio path: no Gemini, no other machine", async () => {
+  const failures = {
+    "no key": {
+      chat: async () => ({ ok: true, json: async () => ({}) }),
+      key: async () => {
+        throw new Error("The dictation gateway key is not available; check the vault");
+      },
+    },
+    "key refused": { chat: async () => ({ ok: false, status: 401 }) },
+    "gateway error": { chat: async () => ({ ok: false, status: 500 }) },
+    "empty answer": { chat: async () => ({ ok: true, json: async () => ({ choices: [] }) }) },
+  };
+  for (const [name, failure] of Object.entries(failures)) {
+    for (const profile of ["studio", "auto"]) {
+      // Dictation: the transcript stays as recognized, with a warning.
+      const dictation = gatewayStudio(failure);
+      const first = fixture({ studio: dictation.studio });
+      const result = await first.instance.processWav({ ...request, profile });
+      assert.equal(result.actualProfile, "studio", name);
+      assert.equal(result.text, "raw studio", name);
+      assert.equal(result.cleanupStatus, "failed", name);
+      assert.match(result.warning, /original transcript kept/, name);
+      assert.equal(result.fallbackReason, undefined, name);
+      assert.deepEqual(first.calls, ["asr"], name);
+      assert.equal(dictation.sent.length, name === "no key" ? 0 : 1, name);
+      await first.instance.shutdown();
+
+      // Text retry: a plain failure, with no local and no cloud attempt.
+      const retry = gatewayStudio(failure);
+      const second = fixture({
+        studio: retry.studio,
+        air: {
+          rewrite: async () => {
+            second.calls.push("air");
+            return { text: "Edited." };
+          },
+        },
+      });
+      await assert.rejects(second.instance.rewrite({ text: "private words", profile }), (error) => {
+        assert.notEqual(error.code, "STUDIO_UNAVAILABLE", name);
+        return true;
+      });
+      assert.deepEqual(second.calls, [], name);
+      await second.instance.shutdown();
+    }
+  }
+
+  // The contrast: a lost connection is the one case that may select this Mac, and only in Auto.
+  const lost = {
+    chat: async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    },
+  };
+  for (const [profile, fallsBack] of [
+    ["auto", true],
+    ["studio", false],
+  ]) {
+    const away = gatewayStudio(lost);
+    const third = fixture({
+      studio: away.studio,
+      air: {
+        rewrite: async () => {
+          third.calls.push("air");
+          return { text: "Edited." };
+        },
+      },
+    });
+    const retry = third.instance.rewrite({ text: "private words", profile });
+    if (fallsBack) assert.equal((await retry).actualProfile, "air");
+    else await assert.rejects(retry, { code: "STUDIO_UNAVAILABLE" });
+    assert.deepEqual(third.calls, fallsBack ? ["air"] : []);
+    await third.instance.shutdown();
+  }
+});
+
 test("exact text retry uses neither model nor vocabulary replacements", async () => {
   const { instance, calls } = fixture();
   const result = await instance.rewrite({

@@ -167,6 +167,8 @@ function createInference({ userData, resourcesPath, onProgress = () => {}, confi
     deps.studio ||
     new StudioClient({
       target: config.studioSshTarget || "mac-studio",
+      text: config.studioText,
+      keyCachePath: path.join(userData, "dictation-gateway-key.bin"),
       prompts: JSON.parse(
         fs.readFileSync(path.join(root, "local-runtime", "prompts.json"), "utf8")
       ),

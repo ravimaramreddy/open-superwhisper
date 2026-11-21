@@ -6,7 +6,10 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { AirWorkerClient } = require("../../desktop/air-worker-client");
-const { StudioClient } = require("../../desktop/studio-client");
+const { StudioClient, gatewayKeySource } = require("../../desktop/studio-client");
+
+// The tests of the LM Studio path select it, as machine.json does with "studioText".
+const lmstudio = { backend: "lmstudio" };
 
 function fakeChild(onRequest = () => {}) {
   const child = new EventEmitter();
@@ -185,6 +188,7 @@ test("Studio recognition sends canonical vocabulary only and omits an empty hint
 
 test("Studio editing keeps personal vocabulary and format in JSON data", async () => {
   const client = new StudioClient({
+    text: lmstudio,
     prompts: { cleanup: "fixed cleanup", rewrite: "fixed rewrite" },
   });
   client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
@@ -216,6 +220,7 @@ test("Studio uses private forwards, owned instance, and reasoning off", async ()
     requests = [];
   let port = 24000;
   const client = new StudioClient({
+    text: lmstudio,
     prompts: { cleanup: "clean", rewrite: "rewrite" },
     portImpl: async () => ++port,
     sleepImpl: async () => {},
@@ -259,6 +264,7 @@ test("Studio warm starts one quiet editor load that a later edit reuses", async 
     commands = [];
   let finishLoad;
   const client = new StudioClient({
+    text: lmstudio,
     prompts: { cleanup: "clean" },
     onProgress: (message) => progress.push(message),
   });
@@ -290,7 +296,7 @@ test("Studio warm starts one quiet editor load that a later edit reuses", async 
 });
 
 test("Studio accepts complete correction longer than 512 tokens", async () => {
-  const client = new StudioClient({ prompts: { cleanup: "clean" } });
+  const client = new StudioClient({ text: lmstudio, prompts: { cleanup: "clean" } });
   client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
   client.ensureEditor = async () => {};
   const tokens = [...Array(767).fill("Edited "), "final detail."];
@@ -309,7 +315,7 @@ test("Studio accepts complete correction longer than 512 tokens", async () => {
 });
 
 test("Studio refuses exhausted correction output using every supported stop signal", async () => {
-  const client = new StudioClient({ prompts: { cleanup: "clean" } });
+  const client = new StudioClient({ text: lmstudio, prompts: { cleanup: "clean" } });
   client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
   client.ensureEditor = async () => {};
   try {
@@ -334,6 +340,7 @@ test("Studio refuses exhausted correction output using every supported stop sign
 function coldStudioFixture() {
   const children = [];
   const client = new StudioClient({
+    text: lmstudio,
     prompts: { cleanup: "clean" },
     spawnImpl: (_exe, args) => {
       const child = fakeChild();
@@ -421,7 +428,7 @@ test("Air retry has its own text-only protocol method and reuses the worker", as
 
 test("Studio receives explicit mode and style instructions without mixing them into transcript data", async () => {
   const prompts = require("../../local-runtime/prompts.json");
-  const client = new StudioClient({ prompts });
+  const client = new StudioClient({ text: lmstudio, prompts });
   client.connect = async () => ({ editor: "http://127.0.0.1:1234" });
   client.ensureEditor = async () => {};
   let observed;
@@ -466,4 +473,276 @@ test("Studio unavailable classification excludes invalid model output", async ()
   });
   await assert.rejects(offline.json("http://127.0.0.1:1234"), { code: "STUDIO_UNAVAILABLE" });
   await offline.shutdown();
+});
+
+// ---- The dictation gateway: the default path of the text model ----
+
+function gatewayFixture({ chat, key = async () => "test-key" } = {}) {
+  const calls = [],
+    requests = [];
+  let port = 24000;
+  const client = new StudioClient({
+    prompts: { cleanup: "fixed cleanup" },
+    keyImpl: key,
+    portImpl: async () => ++port,
+    sleepImpl: async () => {},
+    spawnImpl: (_executable, args) => {
+      calls.push(args);
+      return fakeChild();
+    },
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "healthy" }) };
+      return chat(JSON.parse(options.body));
+    },
+  });
+  const chats = () => requests.filter((request) => request.url.endsWith("/v1/chat/completions"));
+  return { client, calls, requests, chats };
+}
+const answer = (content, extra = {}) => ({
+  ok: true,
+  json: async () => ({
+    choices: [{ message: { content }, finish_reason: "stop" }],
+    usage: { completion_tokens: 3 },
+    ...extra,
+  }),
+});
+
+test("the gateway is the default text path: its own port, chat route, bearer key, thinking off, no lms", async () => {
+  const { client, calls, chats } = gatewayFixture({ chat: async () => answer(" Edited. ") });
+  const vocabulary = [{ word: "OpenSuperwhisper", aliases: ["open super whisper"] }];
+  assert.equal(await client.edit({ text: "raw", vocabulary, format: "list" }), "Edited.");
+  assert.ok(calls[0].includes("127.0.0.1:24001:127.0.0.1:8766"));
+  assert.ok(calls[0].includes("127.0.0.1:24002:127.0.0.1:8640"));
+  assert.equal(chats().length, 1);
+  const { url, options } = chats()[0];
+  assert.equal(url, "http://127.0.0.1:24002/v1/chat/completions");
+  assert.equal(options.headers.Authorization, "Bearer test-key");
+  const body = JSON.parse(options.body);
+  assert.equal(body.model, "dictation");
+  assert.equal(body.temperature, 0);
+  assert.equal(body.enable_thinking, false);
+  assert.equal(body.stream, false);
+  assert.equal(body.max_tokens, 4096);
+  assert.deepEqual(body.messages[0], { role: "system", content: "fixed cleanup" });
+  assert.equal(body.messages[1].role, "user");
+  assert.deepEqual(JSON.parse(body.messages[1].content), {
+    transcript: "raw",
+    vocabulary,
+    format: "list",
+    editing_mode: "polished",
+    style: "neutral",
+  });
+  await client.shutdown();
+  // Only the tunnel was started: no remote lms load, and no unload at shutdown.
+  assert.equal(calls.length, 1);
+  assert.ok(calls.every((args) => !args.at(-1).includes("lms")));
+});
+
+test("machine settings select the gateway port and alias, or LM Studio, and reject unsafe values", () => {
+  const own = new StudioClient({ prompts: {}, text: { port: 9001, model: "my-model.v2" } });
+  assert.deepEqual(own.gateway, { port: 9001, model: "my-model.v2" });
+  assert.deepEqual(new StudioClient({ prompts: {}, text: null }).gateway, {
+    port: 8640,
+    model: "dictation",
+  });
+  assert.equal(new StudioClient({ prompts: {}, text: { backend: "lmstudio" } }).gateway, null);
+  for (const text of [
+    "lmstudio",
+    [],
+    { backend: "cloud" },
+    { port: "8640" },
+    { port: 80 },
+    { port: 70000 },
+    { model: "-o ProxyCommand=x" },
+    { model: "a b" },
+    { model: "" },
+  ])
+    assert.throws(() => new StudioClient({ prompts: {}, text }), /Invalid Studio text settings/);
+});
+
+test("gateway warm sends one small request, and a later edit needs no second warm", async () => {
+  const bodies = [];
+  const { client, chats } = gatewayFixture({
+    chat: async (body) => {
+      bodies.push(body);
+      return answer(body.max_tokens === 1 ? "OK" : "Edited.");
+    },
+  });
+  try {
+    client.warm();
+    client.warm();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(chats().length, 1);
+    assert.equal(bodies[0].max_tokens, 1);
+    assert.ok(!JSON.stringify(bodies[0]).includes("transcript"));
+    assert.equal(await client.edit({ text: "raw" }), "Edited.");
+    client.warm();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(chats().length, 2);
+  } finally {
+    await client.shutdown();
+  }
+});
+
+test("gateway refuses empty or exhausted correction output", async () => {
+  for (const response of [
+    answer(""),
+    answer("   "),
+    answer("Partial", { choices: [{ message: { content: "Partial" }, finish_reason: "length" }] }),
+    answer("Partial", { usage: { completion_tokens: 4096 } }),
+    { ok: true, json: async () => ({ choices: [] }) },
+    { ok: true, json: async () => ({}) },
+  ]) {
+    const { client } = gatewayFixture({ chat: async () => response });
+    await assert.rejects(client.edit({ text: "raw" }), /empty or incomplete/);
+    await client.shutdown();
+  }
+});
+
+test("a missing key or a refusal from the gateway is a plain error; only a lost connection is Studio-unavailable", async () => {
+  // No key: the text is not sent anywhere.
+  const noKey = gatewayFixture({
+    chat: async () => answer("Edited."),
+    key: async () => {
+      throw new Error("The dictation gateway key is not available; check the vault");
+    },
+  });
+  await assert.rejects(noKey.client.edit({ text: "private words" }), (error) => {
+    assert.match(error.message, /key is not available/);
+    assert.notEqual(error.code, "STUDIO_UNAVAILABLE");
+    return true;
+  });
+  assert.equal(noKey.chats().length, 0);
+  await noKey.client.shutdown();
+
+  for (const status of [400, 401, 403, 404, 409, 422, 500]) {
+    let resets = 0;
+    const key = async () => "old-key";
+    key.reset = () => resets++;
+    const refused = gatewayFixture({ chat: async () => ({ ok: false, status }), key });
+    await assert.rejects(refused.client.edit({ text: "raw" }), (error) => {
+      assert.equal(error.status, status);
+      assert.notEqual(error.code, "STUDIO_UNAVAILABLE");
+      return true;
+    });
+    // A refused key is read again from the vault on the next request.
+    assert.equal(resets, [401, 403].includes(status) ? 1 : 0);
+    await refused.client.shutdown();
+  }
+
+  for (const failure of [
+    async () => ({ ok: false, status: 503 }),
+    async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    },
+  ]) {
+    const away = gatewayFixture({ chat: failure });
+    await assert.rejects(away.client.edit({ text: "raw" }), { code: "STUDIO_UNAVAILABLE" });
+    await away.client.shutdown();
+  }
+});
+
+function keyFixture({ vault, saved, encryption = true, env = {} }) {
+  const execs = [],
+    keychain = [],
+    files = new Map(saved ? [["/data/key.bin", Buffer.from(`sealed:${saved}`)]] : []);
+  const missing = () => Object.assign(new Error("missing"), { code: "ENOENT" });
+  const source = gatewayKeySource({
+    cachePath: "/data/key.bin",
+    env,
+    execFileImpl: (file, args, options, done) => {
+      execs.push({ file, args, options });
+      const result = vault();
+      queueMicrotask(() => done(result.error || null, result.stdout || ""));
+    },
+    safeStorageImpl: () => ({
+      isEncryptionAvailable: () => {
+        keychain.push("ask");
+        return encryption;
+      },
+      encryptString: (value) => Buffer.from(`sealed:${value}`),
+      decryptString: (buffer) => String(buffer).replace(/^sealed:/, ""),
+    }),
+    fsImpl: {
+      stat: async (file) => {
+        if (!files.has(file)) throw missing();
+        return {};
+      },
+      writeFile: async (file, data, options) => {
+        files.set(file, data);
+        files.mode = options.mode;
+      },
+      readFile: async (file) => {
+        if (!files.has(file)) throw missing();
+        return files.get(file);
+      },
+    },
+  });
+  return { source, execs, files, keychain };
+}
+
+test("gateway key comes from the vault once per run and leaves an encrypted copy", async () => {
+  const { source, execs, files } = keyFixture({ vault: () => ({ stdout: "vault-key\n" }) });
+  assert.equal(await source(), "vault-key");
+  assert.equal(await source(), "vault-key");
+  assert.equal(execs.length, 1);
+  assert.equal(execs[0].file, path.join(os.homedir(), ".local", "bin", "creds"));
+  assert.deepEqual(execs[0].args, ["get", "/apps/dictation-gateway", "DICTATION_GATEWAY_API_KEY"]);
+  assert.ok(execs[0].options.timeout <= 5000);
+  assert.equal(String(files.get("/data/key.bin")), "sealed:vault-key");
+  assert.equal(files.mode, 0o600);
+});
+
+test("gateway key leaves the Keychain alone on a normal start, and replaces the copy after a refusal", async () => {
+  let current = "new-key";
+  const { source, execs, files, keychain } = keyFixture({
+    vault: () => ({ stdout: current }),
+    saved: "old-key",
+  });
+  assert.equal(await source(), "new-key");
+  assert.deepEqual(keychain, []);
+  assert.equal(String(files.get("/data/key.bin")), "sealed:old-key");
+  // The gateway refused the key: the vault is asked again and the copy is replaced.
+  current = "newer-key";
+  source.reset();
+  assert.equal(await source(), "newer-key");
+  assert.equal(execs.length, 2);
+  assert.equal(String(files.get("/data/key.bin")), "sealed:newer-key");
+});
+
+test("gateway key uses the encrypted copy when the vault is away, and fails plainly with no copy", async () => {
+  const offline = () => ({ error: new Error("vault away"), stdout: "" });
+  const withCopy = keyFixture({ vault: offline, saved: "saved-key" });
+  assert.equal(await withCopy.source(), "saved-key");
+
+  for (const fixture of [
+    keyFixture({ vault: offline }),
+    keyFixture({ vault: offline, saved: "saved-key", encryption: false }),
+    keyFixture({ vault: () => ({ stdout: "  \n" }) }),
+  ]) {
+    await assert.rejects(fixture.source(), (error) => {
+      assert.match(error.message, /key is not available/);
+      assert.notEqual(error.code, "STUDIO_UNAVAILABLE");
+      assert.ok(!error.message.includes("saved-key"));
+      return true;
+    });
+    // A failure is not remembered: the next request asks the vault again.
+    await assert.rejects(fixture.source());
+    assert.equal(fixture.execs.length, 2);
+  }
+
+  const noEncryption = keyFixture({ vault: () => ({ stdout: "vault-key" }), encryption: false });
+  assert.equal(await noEncryption.source(), "vault-key");
+  assert.equal(noEncryption.files.size, 0);
+});
+
+test("gateway key from the environment needs neither the vault nor a saved copy", async () => {
+  const { source, execs, files } = keyFixture({
+    vault: () => ({ stdout: "vault-key" }),
+    env: { OPEN_SUPERWHISPER_GATEWAY_KEY: "env-key" },
+  });
+  assert.equal(await source(), "env-key");
+  assert.equal(execs.length, 0);
+  assert.equal(files.size, 0);
 });
